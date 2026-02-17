@@ -1,7 +1,7 @@
 # Pipeline for Iowa Speech Sample (ISS) v.1.10.B
 
-[![Docker](https://hub.docker.com/repository/docker/melsadany/iowa_speech_sample/)]
-
+[![Docker](https://img.shields.io/badge/docker-ready-blue)](https://hub.docker.com/repository/docker/melsadany/iowa_speech_sample/)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 A fully containerized audio‑to‑feature pipeline designed for the **Iowa Speech Sample (ISS)**, version 1.10.B.  
 The pipeline processes recorded task audio, performs transcription with **WhisperX**, cleans the transcripts, and extracts a rich set of **linguistic, temporal, semantic, phonetic, and acoustic features** – all orchestrated via Docker.
