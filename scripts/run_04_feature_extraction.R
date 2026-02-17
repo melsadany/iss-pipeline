@@ -73,22 +73,22 @@ clean_tx_by_task <- read_rds(file.path(opt$output, paste0(opt$id, "_tasks-minima
 
 
 # Extract features
-features <- extract_all_features(
+features <- extract_all_features_iss(
   cleaned_transcription = clean_tx_by_task,
   participant_id = opt$id,
   embeddings = pipeline_env$embeddings,
   archetype_refs = pipeline_env$archetype_refs,
   reference_data = pipeline_env$reference_data,
   config = config,
-  rule_violations = clean_tx_stats$rule_violations,
   cleaned_full = clean_tx
 )
 
 # Save results
 dir.create(opt$output, showWarnings = FALSE, recursive = TRUE)
-write_csv(features$per_prompt, file.path(opt$output, paste0(opt$id, "_per_prompt.csv")))
-write_csv(features$per_task, file.path(opt$output, paste0(opt$id, "_per_task.csv")))
-write_csv(features$per_participant, file.path(opt$output, paste0(opt$id, "_per_participant.csv")))
+write_rds(features$per_prompt, file.path(opt$output, paste0(opt$id, "_per_prompt.rds")),compress = "gz")
+write_rds(features$per_task, file.path(opt$output, paste0(opt$id, "_per_task.rds")),compress = "gz")
+write_rds(features$per_participant, file.path(opt$output, paste0(opt$id, "_per_participant.rds")),compress = "gz")
+write_rds(features$all_features, file.path(opt$output, paste0(opt$id, "_all_features.rds")),compress = "gz")
 
 log_info("  ✓ Features extracted")
 log_info("✓ Stage 4 Complete")

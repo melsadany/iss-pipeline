@@ -22,7 +22,7 @@ docker run --rm \
   -v $(pwd)/output:/app/output \
   -v $(pwd)/reference_data:/app/reference_data \
   -v $(pwd)/config:/app/config \
-  psvc-pipeline:latest \
+  iss-pipeline:latest \
   $PARTICIPANT_ID \
   /input/$(basename $AUDIO_FILE)
 

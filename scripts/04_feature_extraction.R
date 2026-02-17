@@ -74,23 +74,42 @@ extract_all_features_iss <- function(cleaned_transcription,
   # Combine all features
   all_features <- list(
     word_assoc = word_assoc_features,
-    attention = attention_features,
-    memory = memory_features,
-    sent_rep = sent_rep_features,
-    reading = reading_features
+    attention = list(per_prompt = list(checkbox = cleaned_transcription$checkbox,
+                                       hi = cleaned_transcription$hi),
+                     summarized = attention_features),
+    memory = list(per_prompt = cleaned_transcription$wmemory, 
+                  summarized = memory_features),
+    sent_rep = list(per_prompt = cleaned_transcription$sent_rep,
+                    summarized = sent_rep_features),
+    reading = list(per_prompt = cleaned_transcription$reading,
+                   summarized = reading_features)
   )
   
-  # Create per-participant summary
-  per_participant <- combine_all_features(all_features, participant_id)
+  per_prompt <- list(checkbox=cleaned_transcription$checkbox, 
+                     hi=cleaned_transcription$hi, 
+                     wmemory=cleaned_transcription$wmemory,
+                     reading=cleaned_transcription$reading,
+                     sent_rep=cleaned_transcription$sent_rep,
+                     word_assoc=word_assoc_features$per_prompt)
+  per_task <- list(checkbox_and_hi=attention_features, 
+                   wmemory = memory_features,
+                   reading = reading_features,
+                   sent_rep = sent_rep_features,
+                   word_assoc = word_assoc_features$per_task)
+  per_participant <- list(checkbox_and_hi=attention_features, 
+                          wmemory = memory_features,
+                          reading = reading_features,
+                          sent_rep = sent_rep_features,
+                          word_assoc = word_assoc_features$per_participant)
+  
   
   loginfo("✓ Feature extraction complete")
   
-  return(list(
-    per_prompt = if(!is.null(word_assoc_features)) word_assoc_features$per_prompt else NULL,
-    per_task = if(!is.null(word_assoc_features)) word_assoc_features$per_task else NULL,
-    per_participant = per_participant,
-    task_specific = all_features
-  ))
+  return(list(input = cleaned_transcription,
+              all_features_start = all_features,
+              per_prompt = per_prompt,
+              per_task = per_task,
+              per_participant = per_participant))
 }
 
 ################################################################################
@@ -152,23 +171,22 @@ extract_word_assoc_features <- function(tx, embeddings, archetype_refs,
   
   # COMBINE PER-PROMPT
   per_prompt <- general_features$per_prompt %>%
-    full_join(temporal_features$per_prompt, by = c("participant_id", "prompt")) %>%
-    full_join(constraint_features, by = c("participant_id", "prompt")) %>%
-    full_join(semantic_features$per_prompt, by = c("participant_id", "prompt")) %>%
-    full_join(anchors_features, by = c("participant_id", "prompt")) %>%
-    full_join(phonetic_features$per_prompt, by = c("participant_id", "prompt"))
+    full_join(temporal_features$per_prompt) %>%
+    full_join(semantic_features$per_prompt) %>%
+    full_join(anchors_features) %>%
+    full_join(phonetic_features$per_prompt)
   
-  # COMBINE PER-TASK (by constraint type)
+  # COMBINE PER-TASK
   per_task <- general_features$per_task %>%
-    full_join(temporal_features$per_task, by = c("participant_id", "type")) %>%
-    full_join(semantic_features$per_task, by = c("participant_id", "type")) %>%
-    full_join(phonetic_features$per_task, by = c("participant_id", "type"))
+    full_join(temporal_features$per_task) %>%
+    full_join(semantic_features$per_task) %>%
+    full_join(phonetic_features$per_task)
   
   # COMBINE PER-PARTICIPANT
   per_participant <- general_features$per_participant %>%
-    full_join(temporal_features$per_participant, by = "participant_id") %>%
-    full_join(semantic_features$per_participant, by = "participant_id") %>%
-    full_join(phonetic_features$per_participant, by = "participant_id")
+    full_join(temporal_features$per_participant) %>%
+    full_join(semantic_features$per_participant) %>%
+    full_join(phonetic_features$per_participant)
   
   return(list(
     per_prompt = per_prompt,
@@ -627,12 +645,6 @@ extract_embedding_features <- function(tx_split, embeddings, archetype_ref,
   prompt_sim_trajectory <- calculate_prompt_similarity_trajectory(tx_split, emb_matrix, prefix)
   
   
-  # anchors similarity
-  if (prefix=="sem") {
-    
-  }
-  
-  
   # Combine per-prompt
   per_prompt <- sim_to_prompt %>%
     full_join(pairwise_sim$per_prompt, by = c("participant_id", "prompt")) %>%
@@ -651,7 +663,7 @@ extract_embedding_features <- function(tx_split, embeddings, archetype_ref,
     summarise(across(where(is.numeric), mean, na.rm = TRUE), .groups = "drop")
   
   # Aggregate per participant
-  per_participant <- per_prompt %>% dplyr::select(-colnames(norms$per_prompt)[-c(1:2)]) %>%
+  per_participant <- per_prompt %>% dplyr::select(-colnames(norms$per_prompt)[-c(1:2)],-contains(c("archetypal_area", "archetypal_richness"))) %>%
     group_by(participant_id) %>%
     summarise(across(where(is.numeric), mean, na.rm = TRUE), .groups = "drop") %>%
     # full_join(vocab_volume$per_participant, by = "participant_id") %>%
@@ -1017,8 +1029,11 @@ calculate_pairwise_similarity <- function(tx_split, emb_matrix, prefix = "sem") 
               as.numeric(emb_matrix[pair[2], ])
             )
           })
-          sd(sims, na.rm = TRUE),
-      .groups = "drop"
+          sd(sims, na.rm = TRUE)
+        } else {
+          NA_real_
+        }
+      },.groups = "drop"
     )
   
   per_prompt <- consecutive_sim %>%
@@ -1426,41 +1441,32 @@ extract_attention_features <- function(checkbox, hi, participant_id) {
   hi_summary <- hi %>%
     summarise(
       hi_hit_rate = mean(has_correct_response),
-      hi_mean_rt = mean(first_response_time, na.rm = TRUE)
+      hi_mean_rt = mean(first_response_time, na.rm = TRUE),
+      hi_sd_rt = sd(first_response_time, na.rm = TRUE)
     )
   
   bind_cols(participant_id = participant_id, checkbox_summary, hi_summary)
 }
 
 extract_memory_features <- function(wmemory, participant_id) {
-  wmemory %>%
-    summarise(
-      participant_id = participant_id,
-      wmemory_accuracy = mean(exact_match, na.rm = TRUE),
-      wmemory_phon_similarity = mean(phonological_similarity, na.rm = TRUE)
-    )
+  wmemory %>% mutate(exact_match = as.numeric(exact_match)) %>% group_by(participant_id) %>%
+    summarise_at(.vars = vars(c(recall_time, exact_match, levenshtein_dist, phonological_similarity, recall_score)), 
+                 .funs = function(x) mean(x, na.rm=T))
 }
 
 extract_sent_rep_features <- function(sent_rep, participant_id) {
-  sent_rep %>%
-    summarise(
-      participant_id = participant_id,
-      sent_rep_mean_accuracy = mean(word_accuracy, na.rm = TRUE),
-      sent_rep_bigram_accuracy = mean(bigram_accuracy, na.rm = TRUE),
-      sent_rep_easy_acc = mean(word_accuracy[difficulty == "easy"]),
-      sent_rep_medium_acc = mean(word_accuracy[difficulty == "medium"]),
-      sent_rep_hard_acc = mean(word_accuracy[difficulty == "hard"])
-    )
+  sent_rep %>% group_by(participant_id) %>%
+    summarise_at(.vars = vars(c(response_duration, levenshtein_dist, word_accuracy, 
+                                bigram_accuracy, word_count_diff, lcs_length,
+                                word_order_score)), 
+                 .funs = function(x) mean(x, na.rm=T))
 }
 
 extract_reading_features <- function(reading, participant_id) {
-  reading %>%
-    summarise(
-      participant_id = participant_id,
-      reading_wpm = n() / (max(end) - min(start)) * 60,
-      reading_accuracy = mean(is_correct, na.rm = TRUE),
-      reading_substitutions = sum(!is_correct, na.rm = TRUE)
-    )
+  reading %>% group_by(participant_id, valence) %>%
+    summarise(reading_latency = mean(reading_latency, na.rm=T),
+              is_correct = sum(as.numeric(is_correct)),
+              substitution = sum(as.numeric(!is.na(substitution))))
 }
 
 
