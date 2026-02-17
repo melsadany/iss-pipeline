@@ -17,6 +17,7 @@ The pipeline processes recorded task audio, performs transcription with **Whispe
 - [Overview](#overview)
 - [Features Extracted](#features-extracted)
 - [Requirements](#requirements)
+- [Recording the task](#recording-the-task)
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
 - [Reference Data](#reference-data)
@@ -115,7 +116,6 @@ A simple web app is provided to guide participants and record audio.
   4. Rename the file (e.g., `participant_001.mp3`) and place it in your input folder.
 
 Now you have the audio ready for the pipeline.
-
 
 ---
 
