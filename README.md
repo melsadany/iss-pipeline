@@ -6,7 +6,7 @@
 A fully containerized audio‑to‑feature pipeline designed for the **Iowa Speech Sample (ISS)**, version 1.10.B.  
 The pipeline processes recorded task audio, performs transcription with **WhisperX**, cleans the transcripts, and extracts a rich set of **linguistic, temporal, semantic, phonetic, and acoustic features** – all orchestrated via Docker.
 
-<img src="config/ISS_task_design.pdf" alt="ISS Task Design" width="800"/>
+<img src="config/ISS_task_design.png" alt="ISS Task Design" width="800"/>
 
 
 ---
