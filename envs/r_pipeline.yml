@@ -1,0 +1,35 @@
+name: r_pipeline_env
+channels:
+  - conda-forge
+  - r
+dependencies:
+  - r-base=4.3
+  - r-tidyverse
+  - r-reticulate
+  - r-data.table
+  - r-logger
+  - r-optparse
+  - r-yaml
+  - r-readxl
+  - r-here
+  - r-foreach
+  - r-domc
+  - r-rcppparallel
+  - r-writexl
+  # Audio packages
+  - r-tuner
+  - r-seewave
+  - r-signal
+  # Math/graph packages
+  - r-tsp
+  - r-igraph
+  - r-geometry
+  - r-zoo
+  # NLP-related compiled packages
+  - r-slam
+  - r-nnls
+  - r-lpsolve
+  - r-tidytext
+  # Python
+  - python=3.10
+  - pip

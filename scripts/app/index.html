@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Task Video + Audio Recording</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    body { font-family: sans-serif; max-width: 800px; margin: 0 auto; padding: 1rem; }
+    video { width: 100%; max-height: 70vh; background: #000; }
+    button { margin: 0.5rem 0.5rem 0.5rem 0; }
+    #status { display: block; margin-top: 0.5rem; }
+    #downloadLink { margin-top: 1rem; display: none; }
+  </style>
+</head>
+<body>
+  <h1>Task Video Recording</h1>
+
+  <!-- Task video (source is set in main.js to task_video.mp4) -->
+  <video id="taskVideo"></video>
+
+  <div style="margin-top: 1rem;">
+    <button id="requestMic">Enable microphone</button>
+    <button id="startTask" disabled>Start task</button>
+  </div>
+
+  <!-- Format selection -->
+  <div>
+    <label for="formatSelect">Recording format:</label>
+    <select id="formatSelect">
+      <option value="default">Browser default (webm/ogg)</option>
+      <option value="wav">WAV</option>
+      <option value="mp3">MP3</option>
+    </select>
+  </div>
+
+  <!-- Status + download link -->
+  <span id="status"></span>
+  <a id="downloadLink">Download recording</a>
+
+  <!-- Scripts: lamejs first, then your main JS -->
+  <script src="https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js"></script>
+  <script src="main.js"></script>
+</body>
+</html>
