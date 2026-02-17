@@ -8,6 +8,7 @@ The pipeline processes recorded task audio, performs transcription with **Whispe
 
 <img src="config/ISS_task_design.pdf" alt="ISS Task Design" width="800"/>
 
+
 ---
 
 ## Table of Contents
