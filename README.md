@@ -1,4 +1,4 @@
-# PSVC Pipeline for Iowa Speech Sample (ISS) v.1.10.B
+# Pipeline for Iowa Speech Sample (ISS) v.1.10.B
 
 [![Docker](https://img.shields.io/badge/docker-ready-blue)](https://www.docker.com/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -7,7 +7,7 @@ A fully containerized audio‑to‑feature pipeline designed for the **Iowa Spee
 The pipeline processes recorded task audio, performs transcription with **WhisperX**, cleans the transcripts, and extracts a rich set of **linguistic, temporal, semantic, phonetic, and acoustic features** – all orchestrated via Docker.
 
 For a detailed description of the ISS task design, please refer to the provided PDF:  
-📄 **[ISS_Task_Design.pdf](config/ISS_task_design.pdf)**
+📄 **[ISS_task_design.pdf](config/ISS_task_design.pdf)**
 
 ---
 
@@ -20,8 +20,6 @@ For a detailed description of the ISS task design, please refer to the provided 
 - [Configuration](#configuration)
 - [Reference Data](#reference-data)
 - [Outputs](#outputs)
-- [Processing Modes](#processing-modes)
-- [Troubleshooting](#troubleshooting)
 - [License & Citation](#license--citation)
 
 ---
@@ -199,6 +197,7 @@ This pipeline is released under the MIT License.
 If you use it in your research, please cite:
 
     [hj]
+
 
 Maintainer: Melsadany melsadany24@gmail.com
 Repository: https://github.com/melsadany/iss-pipeline
