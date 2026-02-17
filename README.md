@@ -82,9 +82,40 @@ The pipeline outputs three levels of aggregated data:
 
 - **Docker** (version 20.10+ recommended)
 - At least **8 GB RAM** (16 GB preferred for WhisperX large‑v3)
-- **Storage**: ~10 GB for the Docker image + reference data
+- **Storage**: ~30 GB for the Docker image + reference data
 
 No local installation of Python, R, or CUDA is required – everything runs inside the container.
+
+---
+
+## Recording the task
+
+A simple web app is provided to guide participants and record audio.
+
+  1. Start a local web server in the `scripts/app/` directory:
+  ```bash
+  cd scripts/app
+  python3 -m http.server 8000
+  ```
+  
+  2. Open your browser to `http://localhost:8000`.
+  
+    Make sure `task_video.mp4` (the ISS task video) is in the same folder.
+
+  3. Record the session:
+
+      - Click **"Enable Microphone"** and allow access.
+
+      - Select **MP3** from the format dropdown.
+
+      - Click **"Start task"** – the video will play and recording begins automatically.
+
+      - When the video ends, a download link appears. Click it to save `participant_audio.mp3`.
+
+  4. Rename the file (e.g., `participant_001.mp3`) and place it in your input folder.
+
+Now you have the audio ready for the pipeline.
+
 
 ---
 
@@ -118,6 +149,18 @@ By default, this uses `test_data/test.mp3`. Edit the script to point to your fil
    ```bash
    output/features/TEST0001_per_participant.csv
    ```
+
+Or run directly from **Docker**
+```bash
+docker run --rm \
+    -v /path/to/audio:/input \
+    -v /path/to/output:/app/output \
+    -v /path/to/reference_data:/app/reference_data \
+    -v /path/to/config:/app/config \
+    melsadany/iowa_speech_sample:v1.0 \
+    PARTICIPANT_ID \
+    /input/participant_001.mp3
+```
 
 ---
    
