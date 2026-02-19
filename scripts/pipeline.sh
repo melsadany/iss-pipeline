@@ -10,7 +10,7 @@ REFERENCE_DIR="/app/reference_data"
 MODE="auto"
 
 echo "=========================================="
-echo "PSVC Pipeline - Participant: $PARTICIPANT_ID"
+echo "ISS Pipeline - Participant: $PARTICIPANT_ID"
 echo "=========================================="
 
 # Stage 1: Audio Preprocessing (R)
@@ -21,6 +21,9 @@ echo "[Stage 1] Audio Preprocessing..."
     --id "$PARTICIPANT_ID" \
     --config "$CONFIG" \
     --output "$OUTPUT_DIR/cropped_audio"
+
+mv "$OUTPUT_DIR/cropped_audio/${PARTICIPANT_ID}/${PARTICIPANT_ID}_checkbox-hi-reading-timing-from-sound.rds" "$OUTPUT_DIR/features/."
+
 
 # Stage 2: Transcription (Python with WhisperX)
 echo "[Stage 2] Transcription..."
