@@ -124,7 +124,7 @@ Now you have the audio ready for the pipeline.
 1. **Clone the repository** (or download the code and reference data):
    ```bash
    git clone https://github.com/melsadany/iss-pipeline.git
-   cd psvc-pipeline
+   cd iss-pipeline
    ```
 
 2. **Place your ISS audio file** (MP3 or WAV) in `test_data/` (create the folder if needed):
