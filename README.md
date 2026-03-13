@@ -210,7 +210,7 @@ By default, the Docker image is configured to run the entire pipeline when you s
     MODE="auto"
     
     echo "=========================================="
-    echo "PSVC Pipeline - Participant: $PARTICIPANT_ID"
+    echo "ISS Pipeline - Participant: $PARTICIPANT_ID"
     echo "=========================================="
     
     # Stage 1: Audio Preprocessing (R)
