@@ -87,25 +87,32 @@ The pipeline outputs three levels of aggregated data:
 
 A simple web app is provided to guide participants and record audio. This is what you need before running the Docker container or the scripts. I recommend doing the trial run of the app first before collecting your own task data.
 
-1.  Start a local web server in the `scripts/app/` directory:
+1.  **Clone the repository**
+
+    ``` bash
+    git clone https://github.com/melsadany/iss-pipeline.git
+    cd iss-pipeline
+    ```
+
+2.  Start a local web server in the `scripts/app/` directory:
 
     ``` bash
     cd scripts/app
     python3 -m http.server 8000
     ```
 
-2.  Open your browser to `http://localhost:8000`.
+3.  Open your browser to `http://localhost:8000`.
 
     Make sure `task_video.mp4` (the ISS task video) is in the same folder.
 
-3.  Record the session:
+4.  Record the session following the same order below:
 
     -   Click **"Enable Microphone"** and allow access.
     -   Select **MP3** from the format dropdown.
     -   Click **"Start task"** -- the video will play and recording begins automatically.
     -   When the video ends, a download link appears (takes a few seconds). Click it to save `participant_audio.mp3`.
 
-4.  Rename the file (e.g., `participant_001.mp3`) and place it in your input folder.
+5.  Rename the file (e.g., `participant_001.mp3`) and place it in your input folder.
 
 Now you have the audio ready for the pipeline.
 
