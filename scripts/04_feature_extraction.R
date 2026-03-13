@@ -557,8 +557,8 @@ extract_phonetic_embeddings <- function(words) {
   
   # Call PWE wrapper (runs in pwesuite_env)
   cmd <- paste(
-    "/opt/conda/bin/conda run --no-capture-output -n pwesuite_env",
-    "python /app/scripts/pwe_wrapper.py",
+    "/opt/conda/envs/pwesuite_env/bin/python",
+    "/app/scripts/pwe_wrapper.py",
     "--input", temp_words_file,
     "--output", temp_output_file,
     "--model", "/app/reference_data/models/rnn_metric_learning_token_ort_all.pt",

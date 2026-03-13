@@ -45,6 +45,7 @@ opt <- parse_args(opt_parser)
 # Setup
 log_threshold(INFO)
 log_appender(appender_console)
+system(paste0("mkdir -p ",file.path(opt$output, "features")))
 
 # Source dependencies
 source(file.path(script_dir, "00_initialize.R"))

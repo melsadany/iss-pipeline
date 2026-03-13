@@ -89,7 +89,7 @@ No local installation of Python, R, or CUDA is required -- everything runs insid
 
 You have two options: use the pre‑built image from Docker Hub, or build the image locally from the source.
 
-# Using the Pre‑built Image from Docker Hub
+### Using the Pre‑built Image from Docker Hub
 
 1.  **Pull the image**:
 
@@ -123,7 +123,7 @@ You have two options: use the pre‑built image from Docker Hub, or build the im
 
     Results will appear in `./output/features/`.
 
-# Building Locally
+### Building Locally
 
 If you prefer to build the image yourself:
 
