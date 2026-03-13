@@ -85,6 +85,34 @@ No local installation of Python, R, or CUDA is required -- everything runs insid
 
 ------------------------------------------------------------------------
 
+## Recording the task
+
+A simple web app is provided to guide participants and record audio. This is what you need before running the Docker container or the scripts. I recommend doing the trial run of the app first before collecting your own task data.
+
+1.  Start a local web server in the `scripts/app/` directory:
+
+    ``` bash
+    cd scripts/app
+    python3 -m http.server 8000
+    ```
+
+2.  Open your browser to `http://localhost:8000`.
+
+    Make sure `task_video.mp4` (the ISS task video) is in the same folder.
+
+3.  Record the session:
+
+    -   Click **"Enable Microphone"** and allow access.
+    -   Select **MP3** from the format dropdown.
+    -   Click **"Start task"** -- the video will play and recording begins automatically.
+    -   When the video ends, a download link appears (takes a few seconds). Click it to save `participant_audio.mp3`.
+
+4.  Rename the file (e.g., `participant_001.mp3`) and place it in your input folder.
+
+Now you have the audio ready for the pipeline.
+
+------------------------------------------------------------------------
+
 ## Quick Start
 
 You have two options: use the pre‑built image from Docker Hub, or build the image locally from the source.
@@ -148,34 +176,6 @@ If you prefer to build the image yourself:
     ```
 
 4.  **Run** using the same volume mounts as above, in addition to mounting the reference data volume after downloading it from Zenodo. make sure to replace the image with `iss-pipeline:latest`.
-
-------------------------------------------------------------------------
-
-## Recording the task
-
-A simple web app is provided to guide participants and record audio. This is what you need before running the Docker container or the scripts. I recommend doing the trial run of the app first before collecting your own task data.
-
-1.  Start a local web server in the `scripts/app/` directory:
-
-    ``` bash
-    cd scripts/app
-    python3 -m http.server 8000
-    ```
-
-2.  Open your browser to `http://localhost:8000`.
-
-    Make sure `task_video.mp4` (the ISS task video) is in the same folder.
-
-3.  Record the session:
-
-    -   Click **"Enable Microphone"** and allow access.
-    -   Select **MP3** from the format dropdown.
-    -   Click **"Start task"** -- the video will play and recording begins automatically.
-    -   When the video ends, a download link appears (takes a few seconds). Click it to save `participant_audio.mp3`.
-
-4.  Rename the file (e.g., `participant_001.mp3`) and place it in your input folder.
-
-Now you have the audio ready for the pipeline.
 
 ------------------------------------------------------------------------
 
