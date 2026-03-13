@@ -369,4 +369,5 @@ This pipeline is released under the MIT License. If you use it in your research,
 
     [hj]
 
-Maintainer: Melsadany [melsadany24\@gmail.com](mailto:melsadany24@gmail.com){.email} Repository: <https://github.com/melsadany/iss-pipeline>
+Maintainer: Muhammad Elsadany [melsadany24\@gmail.com](mailto:melsadany24@gmail.com)\
+Repository: <https://github.com/melsadany/iss-pipeline>
