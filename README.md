@@ -81,8 +81,6 @@ The pipeline outputs three levels of aggregated data:
 -   At least **8 GB RAM** (16 GB preferred for WhisperX large‑v3)
 -   **Storage**: \~30 GB for the Docker image + reference data
 
-No local installation of Python, R, or CUDA is required -- everything runs inside the container.
-
 ------------------------------------------------------------------------
 
 ## Recording the task
