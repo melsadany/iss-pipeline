@@ -156,32 +156,6 @@ You have two options: use the pre‑built image from Docker Hub, or build the im
 
     Results will appear in `./output/features/`.
 
-### Building Locally
-
-If you prefer to build the image yourself:
-
-1.  **Clone the repository**
-
-    ``` bash
-    git clone https://github.com/melsadany/iss-pipeline.git
-    cd iss-pipeline
-    ```
-
-2.  **Place your ISS audio file** (MP3 or WAV) in `test_data/` (create the folder if needed):
-
-    ``` bash
-    mkdir -p test_data
-    cp /path/to/your/recording.mp3 test_data/
-    ```
-
-3.  **Build the Docker image**:
-
-    ``` bash
-    docker build -t iss-pipeline:latest .
-    ```
-
-4.  **Run** using the same volume mounts as above, in addition to mounting the reference data volume after downloading it from Zenodo. make sure to replace the image with `iss-pipeline:latest`.
-
 ------------------------------------------------------------------------
 
 ## Running in Interactive/Debugging Mode
@@ -310,29 +284,6 @@ The archive includes:
 -   `archetypes/` -- pre‑computed archetype models (semantic and phonetic)
 -   `linguistic/` -- AoA, GPT familiarity, MRC, concreteness datasets
 -   `task_metadata/` -- ISS task template CSV
-
-Steps:
-
-1.  Download the archive (e.g., reference_data.tar.gz).
-
-2.  Extract it into a local directory, for example:
-
-    ``` bash
-    tar -xzf reference_data.tar.gz -C /path/to/local/reference_data
-    ```
-
-3.  When running the Docker container, mount this directory as a volume:
-
-    ``` bash
-    docker run --rm \
-        -v $(pwd)/test_data:/input \
-        -v $(pwd)/output:/app/output \
-        -v /path/to/local/reference_data:/app/reference_data \
-        -v $(pwd)/config:/app/config \
-        iss-pipeline:latest \
-        PARTICIPANT_ID \
-        /input/your_audio.mp3
-    ```
 
 ------------------------------------------------------------------------
 
