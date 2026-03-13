@@ -24,7 +24,7 @@ The pipeline processes recorded task audio, performs transcription with **Whispe
 
 ------------------------------------------------------------------------
 
-## Overview {#overview}
+## Overview
 
 The **ISS (Iowa Speech Sample) Pipeline** automates the analysis of audio recordings from the ISS cognitive‑linguistic assessment. It:
 
@@ -42,7 +42,7 @@ All computations run inside isolated **conda environments** (`whisperx_env`, `pw
 
 ------------------------------------------------------------------------
 
-## Features Extracted {#features-extracted}
+## Features Extracted
 
 The pipeline outputs three levels of aggregated data:
 
@@ -75,7 +75,7 @@ The pipeline outputs three levels of aggregated data:
 
 ------------------------------------------------------------------------
 
-## Requirements {#requirements}
+## Requirements
 
 -   **Docker** (version 20.10+ recommended)
 -   At least **8 GB RAM** (16 GB preferred for WhisperX large‑v3)
@@ -85,7 +85,7 @@ No local installation of Python, R, or CUDA is required -- everything runs insid
 
 ------------------------------------------------------------------------
 
-## Quick Start {#quick-start}
+## Quick Start
 
 You have two options: use the pre‑built image from Docker Hub, or build the image locally from the source.
 
@@ -155,7 +155,7 @@ If you prefer to build the image yourself:
 
 ------------------------------------------------------------------------
 
-## Recording the task {#recording-the-task}
+## Recording the task
 
 A simple web app is provided to guide participants and record audio. This is what you need before running the Docker container or the scripts. I recommend doing the trial run of the app first before collecting your own task data.
 
@@ -282,7 +282,7 @@ By default, the Docker image is configured to run the entire pipeline when you s
 
 ------------------------------------------------------------------------
 
-## Configuration {#configuration}
+## Configuration
 
 All pipeline parameters are controlled by a single YAML file: `config/task_template.yaml`. Key sections:
 
@@ -297,7 +297,7 @@ Edit this file to adapt the pipeline to different task versions or to enable/dis
 
 ------------------------------------------------------------------------
 
-## Reference Data {#reference-data}
+## Reference Data
 
 The pipeline relies on pre‑computed resources located in `reference_data/.`
 
@@ -337,7 +337,7 @@ Steps:
 
 ------------------------------------------------------------------------
 
-## Outputs {#outputs}
+## Outputs
 
   After a successful run, the `output/` directory contains:
 
