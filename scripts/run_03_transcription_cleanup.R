@@ -84,6 +84,7 @@ cleanup_results <- cleanup_transcription(
 )
 
 # Save cleaned transcription
+system(paste0("mkdir -p ",file.path(opt$output, "review_files")))
 write_tsv(
   cleanup_results$clean_tx,
   file.path(opt$output, "review_files", paste0(opt$id, "_cleaned_transcription.tsv"))

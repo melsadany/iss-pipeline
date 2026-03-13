@@ -99,30 +99,26 @@ You have two options: use the pre‑built image from Docker Hub, or build the im
 
 2.  **Prepare your input**:
 
--   Place your ISS audio file (MP3 or WAV) in a directory, e.g., ./test_data
--   Ensure you have the reference data downloaded and extracted (see Reference Data).
+    Place your ISS audio file (MP3 or WAV) in a directory, e.g., `./test_data`
 
 2.  **Run the pipeline**:
 
     ``` bash
-    docker run --rm \              
-        -v $(pwd)/test_data:/input \              
-        -v $(pwd)/output:/app/output \              
-        -v /path/to/reference_data:/app/reference_data \              
-        -v $(pwd)/config:/app/config \              
-        melsadany/iowa_speech_sample:v1.0 \              
-        PARTICIPANT_ID \              
-        /input/your_audio_file.mp3
+    docker run --rm \
+        -v $(pwd)/test_data:/input \
+        -v $(pwd)/output:/app/output \
+        melsadany/iowa_speech_sample:v1.0 \
+        PARTICIPANT_ID
     ```
 
-    Replace `PARTICIPANT_ID` with an identifier (e.g., SUBJ001) and `your_audio_file.mp3` with the actual filename.\
+    Replace `PARTICIPANT_ID` with an identifier (e.g., SUBJ001)
 
     Explanation: The container expects two command-line arguments: participant ID and the full path to the audio file inside the container.
 
-    Volumes mount your local directories to the expected paths inside the container:\
+    Volumes mount your local directories to the expected paths inside the container:
     -    `/input` -- where the audio file is located.\
     -    `/app/output` -- where results will be written.\
-    -    `/app/reference_data` -- the reference data (must be mounted).\
+    -    `/app/reference_data` -- the reference data (optional, defaults are used if omitted).\
     -    `/app/config` -- your task_template.yaml (optional, defaults are used if omitted).
 
     Results will appear in `./output/features/`.
@@ -151,7 +147,7 @@ If you prefer to build the image yourself:
     docker build -t iss-pipeline:latest .
     ```
 
-4.  **Run** using the same volume mounts as above, but replace the image with `iss-pipeline:latest`. Make sure you have the reference data downloaded from Zenodo.
+4.  **Run** using the same volume mounts as above, in addition to mounting the reference data volume after downloading it from Zenodo. make sure to replace the image with `iss-pipeline:latest`.
 
 ------------------------------------------------------------------------
 
@@ -193,8 +189,6 @@ By default, the Docker image is configured to run the entire pipeline when you s
     docker run -it --rm --entrypoint /bin/bash \
         -v $(pwd)/test_data:/input \
         -v $(pwd)/output:/app/output \
-        -v /path/to/reference_data:/app/reference_data \
-        -v $(pwd)/config:/app/config \
         melsadany/iowa_speech_sample:v1.0
     ```
 
