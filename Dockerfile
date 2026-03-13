@@ -144,7 +144,11 @@ exec /opt/conda/bin/conda run --no-capture-output -n r_pipeline_env python "$@"'
 
 
 # Create output directories
-RUN mkdir -p /app/output/{logs,features,transcriptions,cropped_audio,review_files}
+RUN mkdir -p /app/output/logs
+RUN mkdir -p /app/output/features
+RUN mkdir -p /app/output/transcriptions
+RUN mkdir -p /app/output/cropped_audio
+RUN mkdir -p /app/output/review_files
 
 # Default to R pipeline environment
 COPY scripts/pipeline.sh /app/pipeline.sh
