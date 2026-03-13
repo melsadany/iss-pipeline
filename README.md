@@ -369,5 +369,7 @@ This pipeline is released under the MIT License. If you use it in your research,
 
     [hj]
 
-Maintainer: Muhammad Elsadany [melsadany24\@gmail.com](mailto:melsadany24@gmail.com)\
-Repository: <https://github.com/melsadany/iss-pipeline>
+Maintainer: Muhammad Elsadany [email](mailto:melsadany24@gmail.com)\
+[Repository link](https://github.com/melsadany/iss-pipeline)\
+[Docker](https://hub.docker.com/repository/docker/melsadany/iowa_speech_sample/)\ [Zenodo](https://zenodo.org/records/18675411?token=eyJhbGciOiJIUzUxMiJ9.eyJpZCI6IjdjN2NlMzdhLTVmOTMtNDA5MS05NWNkLTdiNGU4MTFmMWI0YyIsImRhdGEiOnt9LCJyYW5kb20iOiJiNTEwZmUwZWY2ZmViODU5NTBmZDczYjZhMTZiZGMyYSJ9.UVUronrV_8iJAW_kiqGclwoejb_CE9lpjcfaNAnayoUfULjpTTQOqn1EM9E6KjgnnED771vqICz9DDz9HPCzwQ)
+
