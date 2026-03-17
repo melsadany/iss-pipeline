@@ -132,7 +132,7 @@ You have two options: use the pre‑built image from Docker Hub, or build the im
 
 2.  **Prepare your input**:
 
-    Place your ISS audio file (MP3 or WAV) in a directory, e.g., `./test_data`
+    Place your ISS audio file (MP3 or WAV) in a directory, e.g., `./input`
 
 2.  **Run the pipeline**:
 
@@ -170,6 +170,8 @@ By default, the Docker image is configured to run the entire pipeline when you s
 1.  **Start a shell inside the container**:
 
     ``` bash
+    # build the same directory structure explained above
+    
     docker run -it --rm --entrypoint /bin/bash \
         -v $(pwd)/test_data:/input \
         -v $(pwd)/output:/app/output \
@@ -331,7 +333,7 @@ This pipeline is released under the MIT License. If you use it in your research,
     [hj]
 
 Maintainer: Muhammad Elsadany \
-[email](mailto:melsadany24@gmail.com) 
-[Repository link](https://github.com/melsadany/iss-pipeline) 
-[Docker](https://hub.docker.com/repository/docker/melsadany/iowa_speech_sample/)  [Zenodo](https://zenodo.org/records/18675411?token=eyJhbGciOiJIUzUxMiJ9.eyJpZCI6IjdjN2NlMzdhLTVmOTMtNDA5MS05NWNkLTdiNGU4MTFmMWI0YyIsImRhdGEiOnt9LCJyYW5kb20iOiJiNTEwZmUwZWY2ZmViODU5NTBmZDczYjZhMTZiZGMyYSJ9.UVUronrV_8iJAW_kiqGclwoejb_CE9lpjcfaNAnayoUfULjpTTQOqn1EM9E6KjgnnED771vqICz9DDz9HPCzwQ)
+[email](mailto:melsadany24@gmail.com) - 
+[Repository link](https://github.com/melsadany/iss-pipeline) - 
+[Docker](https://hub.docker.com/repository/docker/melsadany/iowa_speech_sample/) -  [Zenodo](https://zenodo.org/records/18675411?token=eyJhbGciOiJIUzUxMiJ9.eyJpZCI6IjdjN2NlMzdhLTVmOTMtNDA5MS05NWNkLTdiNGU4MTFmMWI0YyIsImRhdGEiOnt9LCJyYW5kb20iOiJiNTEwZmUwZWY2ZmViODU5NTBmZDczYjZhMTZiZGMyYSJ9.UVUronrV_8iJAW_kiqGclwoejb_CE9lpjcfaNAnayoUfULjpTTQOqn1EM9E6KjgnnED771vqICz9DDz9HPCzwQ)
 
