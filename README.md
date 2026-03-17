@@ -137,11 +137,16 @@ You have two options: use the pre‑built image from Docker Hub, or build the im
 2.  **Run the pipeline**:
 
     ``` bash
+    # build your directory
+    mkdir -p input output/cropped_audio output/transcriptions output/review_files output/features
+    mv YOUR_AUDIO_FILE.mp3 input/participant_audio.mp3
+    
     docker run --rm \
         -v $(pwd)/test_data:/input \
         -v $(pwd)/output:/app/output \
         melsadany/iowa_speech_sample:v1.0 \
-        PARTICIPANT_ID
+        PARTICIPANT_ID \
+        /input/participant_audio.mp3
     ```
 
     Replace `PARTICIPANT_ID` with an identifier (e.g., SUBJ001)
