@@ -279,5 +279,8 @@ RUN mkdir -p /app/output/logs \
 COPY scripts/pipeline.sh /app/pipeline.sh
 RUN chmod +x /app/pipeline.sh
 
+# extra
+RUN /opt/conda/envs/pwesuite_env/bin/pip install panphon && /opt/conda/envs/pwesuite_env/bin/pip install panphon2
+
 ENTRYPOINT ["/app/pipeline.sh"]
 CMD ["test_participant", "/app/data/example_audio.wav"]
