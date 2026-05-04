@@ -1,0 +1,283 @@
+# Use Ubuntu 22.04 LTS as base — multi-arch (amd64 + arm64) on Docker Hub
+FROM ubuntu:22.04
+
+LABEL maintainer="melsadany24@gmail.com"
+LABEL description="PSVC Audio Processing Pipeline with WhisperX, PWESuite, and R"
+LABEL version="1.1"
+LABEL org.opencontainers.image.source="https://github.com/melsadany/psvc-pipeline"
+
+### MULTI-ARCH: buildx auto-injects TARGETARCH = amd64 | arm64 | ...
+ARG TARGETARCH
+
+# Pin a Miniconda version that predates the broken shards-cache solver.
+# (Conda 26.x ships a sqlite-backed libmamba shards cache that deadlocks
+#  under buildx. 24.11.x uses the old classic cache and is rock-solid.)
+ARG MINICONDA_VERSION=py311_24.11.1-0
+
+# Set environment to avoid interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Use a reliable mirror and force IPv4.
+# NOTE: The USTC mirror carries only amd64 + i386. On arm64 we must stay on
+#       the default archive (Ubuntu auto-routes arm64 to ports.ubuntu.com).
+RUN set -eux; \
+    if [ "$TARGETARCH" = "amd64" ]; then \
+      sed -i 's|archive.ubuntu.com|mirrors.ustc.edu.cn|g' /etc/apt/sources.list; \
+    fi; \
+    echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99force-ipv4; \
+    echo 'Acquire::Retries "5";'     > /etc/apt/apt.conf.d/80-retries
+
+# Install basic packages first
+RUN apt-get update && apt-get install -y \
+    wget \
+    curl \
+    ca-certificates \
+    gnupg \
+    lsb-release
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    libsndfile1 \
+    git \
+    build-essential \
+    # R package system dependencies
+    libxml2-dev \
+    libcurl4-openssl-dev \
+    libssl-dev \
+    libfontconfig1-dev \
+    libharfbuzz-dev \
+    libfribidi-dev \
+    libfreetype6-dev \
+    libpng-dev \
+    libtiff5-dev \
+    libjpeg-dev \
+    libgit2-dev \
+    # For audio packages (tuneR, seewave)
+    libasound2-dev \
+    libfftw3-dev \
+    # For igraph
+    libglpk-dev \
+    libgmp3-dev \
+    # For geometry
+    libqhull-dev \
+    cmake \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+### MULTI-ARCH: Miniconda installer per arch, pinned version.
+#   amd64 -> Linux-x86_64
+#   arm64 -> Linux-aarch64
+RUN set -eux; \
+    case "$TARGETARCH" in \
+      amd64)  ARCHSUFFIX=Linux-x86_64  ;; \
+      arm64)  ARCHSUFFIX=Linux-aarch64 ;; \
+      *)      echo "Unsupported TARGETARCH: $TARGETARCH" >&2; exit 1 ;; \
+    esac; \
+    wget "https://repo.anaconda.com/miniconda/Miniconda3-${MINICONDA_VERSION}-${ARCHSUFFIX}.sh" \
+         -O /tmp/miniconda.sh; \
+    bash /tmp/miniconda.sh -b -p /opt/conda; \
+    rm /tmp/miniconda.sh
+
+# Add conda to PATH
+ENV PATH="/opt/conda/bin:$PATH"
+
+### Force the classic solver for this build.
+#   Belt-and-suspenders alongside the Miniconda version pin above: even if
+#   someone later bumps MINICONDA_VERSION, this keeps the notorious
+#   "sqlite3.OperationalError: database is locked" from the shards-based
+#   libmamba solver from reappearing in buildx.
+ENV CONDA_SOLVER=classic
+ENV CONDA_NO_PLUGINS=true
+
+WORKDIR /app
+
+# Copy environment files
+COPY envs/whisperx.yml    /tmp/whisperx.yml
+COPY envs/pwesuite.yml    /tmp/pwesuite.yml
+COPY envs/r_pipeline.yml  /tmp/r_pipeline.yml
+
+# Accept conda Terms of Service
+ENV CONDA_TOS_ACCEPT=yes
+
+# Increase pip timeout and retries
+RUN pip config set global.timeout 600 && \
+    pip config set global.retries 10 && \
+    pip config set global.default-timeout 600
+
+### MULTI-ARCH: On arm64, strip any CUDA/CUDNN pins from the yml files
+#   before conda reads them. CUDA wheels do not exist for linux/arm64 and
+#   will cause `conda env create` to fail with "no solvable package".
+#
+#   On amd64 this block is a no-op.
+RUN set -eux; \
+    if [ "$TARGETARCH" = "arm64" ]; then \
+      for f in /tmp/whisperx.yml /tmp/pwesuite.yml /tmp/r_pipeline.yml; do \
+        echo "Filtering CUDA pins from $f (arm64 build)"; \
+        sed -i -E '/([Cc]uda|cudatoolkit|nvidia|cudnn|pytorch-cuda|=.*\+cu[0-9]+)/d' "$f"; \
+      done; \
+    fi
+
+### MULTI-ARCH: On arm64, several r-* packages are missing from conda-forge
+#   for linux-aarch64 (r-tuner, r-seewave, r-tidytext, r-tidyverse, r-logger,
+#   r-optparse, r-here, r-foreach, r-domc). Strip them from r_pipeline.yml so
+#   the env actually solves; we'll install the CRAN equivalents from source
+#   in a later RUN step (still inside r_pipeline_env).
+#
+#   On amd64 this block is a no-op.
+RUN set -eux; \
+    if [ "$TARGETARCH" = "arm64" ]; then \
+      echo "Stripping arm64-missing r-* packages from r_pipeline.yml"; \
+      sed -i -E '/^[[:space:]]*-[[:space:]]*(r-tuner|r-seewave|r-tidytext|r-tidyverse|r-logger|r-optparse|r-here|r-foreach|r-domc)([[:space:]]|=|$)/d' /tmp/r_pipeline.yml; \
+      echo "--- r_pipeline.yml after arm64 strip ---"; \
+      cat /tmp/r_pipeline.yml; \
+    fi
+
+# Create all conda environments.
+# Each env create is its own RUN so a retry resumes from the last good layer.
+# NOTE: `conda tos accept` was introduced in conda 25.x. We're pinned to
+# 24.11.1 (predates the buildx-breaking shards-cache solver), which also
+# predates ToS enforcement, so no accept step is needed.
+#
+### IMPORTANT: We do NOT use `conda env create -f /tmp/whisperx.yml` here.
+#   Two upstream problems need to be worked around:
+#
+#   1. whisperx.yml pins `python=3.10`, but modern whisperx (3.8.x) ->
+#      pyannote-audio 4.x -> lightning>=2.0.1 requires Python >=3.11.
+#
+#   2. The `lightning` meta-package was recently removed from PyPI (404).
+#      Only `pytorch-lightning` remains there. However, `lightning` IS still
+#      available on conda-forge, so we install it via conda BEFORE pip runs.
+#      When pip-install whisperx then hits `pyannote-audio -> lightning`
+#      it sees the requirement is already satisfied and stops trying to
+#      download it from PyPI.
+#
+# Step 1: create env with python=3.11 + ffmpeg + conda-installed lightning.
+RUN conda create -n whisperx_env -c conda-forge -y \
+        python=3.11 pip ffmpeg \
+        lightning pytorch-lightning
+
+# Step 2: pip-install whisperx and friends. Torch is pulled in transitively
+# by whisperx; we also list it explicitly so the later CPU-torch reinstall
+# step has something to replace.
+RUN /opt/conda/envs/whisperx_env/bin/pip install --timeout 600 \
+        whisperx torch torchaudio && \
+    /opt/conda/envs/whisperx_env/bin/pip uninstall -y torchvision || true
+
+RUN conda env create -f /tmp/pwesuite.yml
+RUN conda env create -f /tmp/r_pipeline.yml
+RUN conda clean -afy
+
+### MULTI-ARCH: Force CPU-only PyTorch in the whisperx env.
+#   • On arm64: CUDA doesn't exist — CPU wheels are the only option.
+#   • On amd64: Docker on macOS has no GPU passthrough, and most Docker-on-Linux
+#     hosts lack NVIDIA runtime. CPU wheels work on both and eliminate the
+#     recurring torch ↔ torchcodec ABI mismatches you've been hitting.
+RUN /opt/conda/envs/whisperx_env/bin/pip install --upgrade --force-reinstall \
+      --index-url https://download.pytorch.org/whl/cpu \
+      torch torchaudio
+
+### MULTI-ARCH: Remove torchcodec entirely — pyannote falls back to ffmpeg
+#   and the ABI error ("undefined symbol: _ZN3c1013MessageLogger...") goes
+#   away. If a torch+torchcodec pair is known-good in future, pin both.
+RUN /opt/conda/envs/whisperx_env/bin/pip uninstall -y torchcodec || true
+
+# Verify whisperx installation
+RUN /opt/conda/bin/conda run -n whisperx_env python -c \
+    "import torch, whisperx; print('whisperx_env verified on torch', torch.__version__)" \
+    || echo "WARNING: whisperx_env verification failed"
+
+# Clone PWESuite to /app/pwesuite and install
+RUN cd /app && \
+    git clone https://github.com/zouharvi/pwesuite.git && \
+    /opt/conda/envs/pwesuite_env/bin/pip install  \
+        --no-deps \
+        --ignore-requires-python \
+        -e /app/pwesuite
+
+# Update pwe_wrapper.py to reference the correct path
+ENV PYTHONPATH="/app/pwesuite"
+
+### MULTI-ARCH: Install sentence-transformers etc. in r_pipeline_env.
+#   Same CPU-only torch treatment as whisperx_env.
+RUN /opt/conda/envs/r_pipeline_env/bin/pip install \
+      --index-url https://download.pytorch.org/whl/cpu \
+      torch && \
+    /opt/conda/envs/r_pipeline_env/bin/pip install \
+      sentence-transformers \
+      transformers \
+      vaderSentiment \
+      textstat \
+      pandas
+
+# Install R packages via conda (pre-compiled)
+RUN /bin/bash -c "source /opt/conda/etc/profile.d/conda.sh && \
+    conda activate r_pipeline_env && \
+    Rscript -e \"install.packages('devtools', repos='https://cloud.r-project.org', Ncpus=2)\"" && \
+    conda clean -afy
+
+# Install R packages NOT in conda (but safe to install from CRAN).
+# MUST activate environment first to use conda's compilers.
+RUN /bin/bash -c "source /opt/conda/etc/profile.d/conda.sh && \
+    conda activate r_pipeline_env && \
+    Rscript -e \"options(repos = c(CRAN = 'https://cloud.r-project.org')); \
+    packages <- c('ineq', 'archetypes', 'syuzhet', 'lingmatch', 'sentimentr', 'logging', 'stringdist', 'phonics'); \
+    for (pkg in packages) { \
+      tryCatch({ \
+        install.packages(pkg, dependencies = TRUE); \
+        cat(paste('Successfully installed', pkg, '\\\\n')); \
+      }, error = function(e) { \
+        cat(paste('FAILED to install', pkg, ':', e\$message, '\\\\n')); \
+      }); \
+    }\""
+
+### MULTI-ARCH: On arm64, install the r-* packages we stripped from
+#   r_pipeline.yml (missing on conda-forge linux-aarch64) directly from
+#   CRAN. These compile from source — Ncpus speeds it up — and we have all
+#   the system -dev libs already from the apt step at the top.
+#
+#   On amd64 this block is a no-op.
+RUN set -eux; \
+    if [ "$TARGETARCH" = "arm64" ]; then \
+      /bin/bash -c "source /opt/conda/etc/profile.d/conda.sh && \
+        conda activate r_pipeline_env && \
+        Rscript -e \"options(repos = c(CRAN = 'https://cloud.r-project.org'), Ncpus = parallel::detectCores()); \
+        arm64_packages <- c('tuneR', 'seewave', 'tidytext', 'tidyverse', 'logger', 'optparse', 'here', 'foreach', 'doMC'); \
+        for (pkg in arm64_packages) { \
+          tryCatch({ \
+            install.packages(pkg, dependencies = TRUE); \
+            cat(paste('Successfully installed (arm64 CRAN)', pkg, '\\\\n')); \
+          }, error = function(e) { \
+            cat(paste('FAILED to install (arm64 CRAN)', pkg, ':', e\$message, '\\\\n')); \
+          }); \
+        }\" "; \
+    fi
+
+# Copy scripts and reference data
+COPY scripts/        /app/scripts/
+COPY config/         /app/config/
+COPY reference_data/ /app/reference_data/
+
+# Create wrapper scripts that activate correct environments
+RUN echo '#!/bin/bash\n\
+exec /opt/conda/bin/conda run --no-capture-output -n whisperx_env python "$@"' > /usr/local/bin/run-whisperx && chmod +x /usr/local/bin/run-whisperx
+
+RUN echo '#!/bin/bash\n\
+exec /opt/conda/bin/conda run --no-capture-output -n pwesuite_env python "$@"' > /usr/local/bin/run-pwesuite && chmod +x /usr/local/bin/run-pwesuite
+
+RUN echo '#!/bin/bash\n\
+exec /opt/conda/bin/conda run --no-capture-output -n r_pipeline_env python "$@"' > /usr/local/bin/run-pipeline && chmod +x /usr/local/bin/run-pipeline
+
+# Create output directories
+RUN mkdir -p /app/output/logs \
+             /app/output/features \
+             /app/output/transcriptions \
+             /app/output/cropped_audio \
+             /app/output/review_files
+
+# Default to R pipeline environment
+COPY scripts/pipeline.sh /app/pipeline.sh
+RUN chmod +x /app/pipeline.sh
+
+ENTRYPOINT ["/app/pipeline.sh"]
+CMD ["test_participant", "/app/data/example_audio.wav"]
