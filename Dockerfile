@@ -154,5 +154,10 @@ RUN mkdir -p /app/output/review_files
 COPY scripts/pipeline.sh /app/pipeline.sh
 RUN chmod +x /app/pipeline.sh
 
+# extra
+RUN cd /app/pwesuite
+RUN /opt/conda/envs/pwesuite_env/bin/pip install -e .
+RUN cd /app
+
 ENTRYPOINT ["/app/pipeline.sh"]
 CMD ["test_participant", "/app/data/example_audio.wav"]
