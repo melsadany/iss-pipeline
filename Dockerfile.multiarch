@@ -287,26 +287,23 @@ RUN /opt/conda/envs/pwesuite_env/bin/pip install panphon
 # linux/aarch64 wheel and no sdist. On arm64 we build from the upstream
 # Rust source (dmort27/rspanphon) using Rust + maturin.
 #
-# Steps for arm64:
-#   1. Install Rust toolchain via rustup (needed to compile the Rust crate).
-#   2. Install maturin into the pwesuite_env via pip.
-#   3. Clone rspanphon, build a wheel with maturin, install it.
-#   4. Clean up Rust toolchain and source to keep the layer small.
-#
-# On amd64 the pre-built PyPI wheel is used directly.
+# NOTE: `export PATH=...` inside a RUN step does NOT persist across `&&`
+# because Docker executes the entire RUN block as one shell invocation and
+# the PATH export only affects the shell's own environment, not the PATH
+# seen by commands after the next `&&`. We therefore call maturin and
+# rustup by their absolute paths (/root/.cargo/bin/...) instead.
 RUN set -eux; \
     if [ "$TARGETARCH" = "arm64" ]; then \
       curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal; \
-      export PATH="/root/.cargo/bin:$PATH"; \
       /opt/conda/envs/pwesuite_env/bin/pip install maturin; \
       git clone https://github.com/dmort27/rspanphon.git /tmp/rspanphon_src; \
-      cd /tmp/rspanphon_src; \
-      maturin build --release \
+      /opt/conda/envs/pwesuite_env/bin/maturin build --release \
+          --manifest-path /tmp/rspanphon_src/Cargo.toml \
           --interpreter /opt/conda/envs/pwesuite_env/bin/python \
           --out /tmp/panphon2_wheels; \
       /opt/conda/envs/pwesuite_env/bin/pip install /tmp/panphon2_wheels/*.whl; \
       rm -rf /tmp/rspanphon_src /tmp/panphon2_wheels; \
-      rustup self uninstall -y; \
+      /root/.cargo/bin/rustup self uninstall -y; \
     else \
       /opt/conda/envs/pwesuite_env/bin/pip install panphon2; \
     fi
