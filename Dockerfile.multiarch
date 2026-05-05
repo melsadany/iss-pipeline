@@ -279,17 +279,19 @@ RUN mkdir -p /app/output/logs \
 COPY scripts/pipeline.sh /app/pipeline.sh
 RUN chmod +x /app/pipeline.sh
 
-# Install panphon + panphon2 in pwesuite_env.
-# panphon2 has no linux/aarch64 wheel on PyPI, so on arm64 we build it from
-# source via git. On amd64 the normal PyPI wheel is used.
+# Install panphon in pwesuite_env (wheel available on all arches).
 RUN /opt/conda/envs/pwesuite_env/bin/pip install panphon
+
+# Install panphon2 only on amd64.
+# panphon2 is a Rust extension (built with maturin) and its PyPI release
+# ships only linux/x86_64 and macOS wheels — no linux/aarch64 wheel and no
+# sdist. There is nothing to install on arm64; any code that calls panphon2
+# on that arch must guard with `try/except ImportError`.
 RUN set -eux; \
-    if [ "$TARGETARCH" = "arm64" ]; then \
-      git clone https://github.com/dmort27/panphon2.git /tmp/panphon2_src && \
-      /opt/conda/envs/pwesuite_env/bin/pip install /tmp/panphon2_src && \
-      rm -rf /tmp/panphon2_src; \
-    else \
+    if [ "$TARGETARCH" = "amd64" ]; then \
       /opt/conda/envs/pwesuite_env/bin/pip install panphon2; \
+    else \
+      echo "Skipping panphon2 on $TARGETARCH — no linux/aarch64 wheel on PyPI"; \
     fi
 
 ENTRYPOINT ["/app/pipeline.sh"]
