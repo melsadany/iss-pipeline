@@ -169,10 +169,10 @@ RUN conda env create -f /tmp/r_pipeline.yml
 RUN conda clean -afy
 
 ### MULTI-ARCH: Force CPU-only PyTorch in the whisperx env.
-#   • On arm64: CUDA doesn't exist — CPU wheels are the only option.
+#   • On arm64: CUDA doesn’t exist — CPU wheels are the only option.
 #   • On amd64: Docker on macOS has no GPU passthrough, and most Docker-on-Linux
 #     hosts lack NVIDIA runtime. CPU wheels work on both and eliminate the
-#     recurring torch ↔ torchcodec ABI mismatches you've been hitting.
+#     recurring torch ↔ torchcodec ABI mismatches you’ve been hitting.
 RUN /opt/conda/envs/whisperx_env/bin/pip install --upgrade --force-reinstall \
       --index-url https://download.pytorch.org/whl/cpu \
       torch torchaudio
@@ -279,8 +279,18 @@ RUN mkdir -p /app/output/logs \
 COPY scripts/pipeline.sh /app/pipeline.sh
 RUN chmod +x /app/pipeline.sh
 
-# extra
-RUN /opt/conda/envs/pwesuite_env/bin/pip install panphon && /opt/conda/envs/pwesuite_env/bin/pip install panphon2
+# Install panphon + panphon2 in pwesuite_env.
+# panphon2 has no linux/aarch64 wheel on PyPI, so on arm64 we build it from
+# source via git. On amd64 the normal PyPI wheel is used.
+RUN /opt/conda/envs/pwesuite_env/bin/pip install panphon
+RUN set -eux; \
+    if [ "$TARGETARCH" = "arm64" ]; then \
+      git clone https://github.com/dmort27/panphon2.git /tmp/panphon2_src && \
+      /opt/conda/envs/pwesuite_env/bin/pip install /tmp/panphon2_src && \
+      rm -rf /tmp/panphon2_src; \
+    else \
+      /opt/conda/envs/pwesuite_env/bin/pip install panphon2; \
+    fi
 
 ENTRYPOINT ["/app/pipeline.sh"]
 CMD ["test_participant", "/app/data/example_audio.wav"]
