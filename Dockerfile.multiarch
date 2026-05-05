@@ -284,21 +284,16 @@ RUN /opt/conda/envs/pwesuite_env/bin/pip install panphon
 
 # Install panphon2 in pwesuite_env.
 # PyPI ships linux/x86_64 and macOS wheels only — no linux/aarch64 wheel
-# and no sdist. On arm64 we build from source using the upstream repo
-# https://github.com/dmort27/panphon2 (a maturin/PyO3 Rust crate).
+# and no sdist. On arm64 we build from source: https://github.com/dmort27/panphon2
 #
-# Two PATH gotchas in a single Docker RUN block:
-#   1. `export PATH=...` does NOT persist across `&&` — each command is a
-#      subprocess. So `cargo` (installed by rustup to /root/.cargo/bin) is
-#      invisible to maturin unless we explicitly source rustup's env file.
-#   2. maturin calls `cargo` internally, so cargo must be on PATH even
-#      though we invoke maturin by its full pip-installed path.
-# Fix: `. "$HOME/.cargo/env"` (POSIX dot-source) before calling maturin.
+# The repo's Cargo.toml uses the `[package.metadata.maturin] classifier` field,
+# which was valid in maturin <0.14 but removed in 0.14+. We must pin maturin
+# to 0.13.x (last version that accepts it). 0.13.7 is the final 0.13 release.
 RUN set -eux; \
     if [ "$TARGETARCH" = "arm64" ]; then \
       curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal; \
       . "$HOME/.cargo/env"; \
-      /opt/conda/envs/pwesuite_env/bin/pip install maturin; \
+      /opt/conda/envs/pwesuite_env/bin/pip install "maturin==0.13.7"; \
       git clone https://github.com/dmort27/panphon2.git /tmp/panphon2_src; \
       /opt/conda/envs/pwesuite_env/bin/maturin build --release \
           --manifest-path /tmp/panphon2_src/Cargo.toml \
