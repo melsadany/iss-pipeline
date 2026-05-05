@@ -282,16 +282,33 @@ RUN chmod +x /app/pipeline.sh
 # Install panphon in pwesuite_env (wheel available on all arches).
 RUN /opt/conda/envs/pwesuite_env/bin/pip install panphon
 
-# Install panphon2 only on amd64.
-# panphon2 is a Rust extension (built with maturin) and its PyPI release
-# ships only linux/x86_64 and macOS wheels — no linux/aarch64 wheel and no
-# sdist. There is nothing to install on arm64; any code that calls panphon2
-# on that arch must guard with `try/except ImportError`.
+# Install panphon2 in pwesuite_env.
+# The PyPI release ships only linux/x86_64 and macOS ARM64 wheels — no
+# linux/aarch64 wheel and no sdist. On arm64 we build from the upstream
+# Rust source (dmort27/rspanphon) using Rust + maturin.
+#
+# Steps for arm64:
+#   1. Install Rust toolchain via rustup (needed to compile the Rust crate).
+#   2. Install maturin into the pwesuite_env via pip.
+#   3. Clone rspanphon, build a wheel with maturin, install it.
+#   4. Clean up Rust toolchain and source to keep the layer small.
+#
+# On amd64 the pre-built PyPI wheel is used directly.
 RUN set -eux; \
-    if [ "$TARGETARCH" = "amd64" ]; then \
-      /opt/conda/envs/pwesuite_env/bin/pip install panphon2; \
+    if [ "$TARGETARCH" = "arm64" ]; then \
+      curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal; \
+      export PATH="/root/.cargo/bin:$PATH"; \
+      /opt/conda/envs/pwesuite_env/bin/pip install maturin; \
+      git clone https://github.com/dmort27/rspanphon.git /tmp/rspanphon_src; \
+      cd /tmp/rspanphon_src; \
+      maturin build --release \
+          --interpreter /opt/conda/envs/pwesuite_env/bin/python \
+          --out /tmp/panphon2_wheels; \
+      /opt/conda/envs/pwesuite_env/bin/pip install /tmp/panphon2_wheels/*.whl; \
+      rm -rf /tmp/rspanphon_src /tmp/panphon2_wheels; \
+      rustup self uninstall -y; \
     else \
-      echo "Skipping panphon2 on $TARGETARCH — no linux/aarch64 wheel on PyPI"; \
+      /opt/conda/envs/pwesuite_env/bin/pip install panphon2; \
     fi
 
 ENTRYPOINT ["/app/pipeline.sh"]
