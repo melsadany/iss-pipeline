@@ -169,10 +169,10 @@ RUN conda env create -f /tmp/r_pipeline.yml
 RUN conda clean -afy
 
 ### MULTI-ARCH: Force CPU-only PyTorch in the whisperx env.
-#   • On arm64: CUDA doesn’t exist — CPU wheels are the only option.
+#   • On arm64: CUDA doesn't exist — CPU wheels are the only option.
 #   • On amd64: Docker on macOS has no GPU passthrough, and most Docker-on-Linux
 #     hosts lack NVIDIA runtime. CPU wheels work on both and eliminate the
-#     recurring torch ↔ torchcodec ABI mismatches you’ve been hitting.
+#     recurring torch ↔ torchcodec ABI mismatches you've been hitting.
 RUN /opt/conda/envs/whisperx_env/bin/pip install --upgrade --force-reinstall \
       --index-url https://download.pytorch.org/whl/cpu \
       torch torchaudio
@@ -283,26 +283,29 @@ RUN chmod +x /app/pipeline.sh
 RUN /opt/conda/envs/pwesuite_env/bin/pip install panphon
 
 # Install panphon2 in pwesuite_env.
-# The PyPI release ships only linux/x86_64 and macOS ARM64 wheels — no
-# linux/aarch64 wheel and no sdist. On arm64 we build from the upstream
-# Rust source (dmort27/rspanphon) using Rust + maturin.
+# PyPI ships linux/x86_64 and macOS wheels only — no linux/aarch64 wheel
+# and no sdist. On arm64 we build from source using the upstream repo
+# https://github.com/dmort27/panphon2 (a maturin/PyO3 Rust crate).
 #
-# NOTE: `export PATH=...` inside a RUN step does NOT persist across `&&`
-# because Docker executes the entire RUN block as one shell invocation and
-# the PATH export only affects the shell's own environment, not the PATH
-# seen by commands after the next `&&`. We therefore call maturin and
-# rustup by their absolute paths (/root/.cargo/bin/...) instead.
+# Two PATH gotchas in a single Docker RUN block:
+#   1. `export PATH=...` does NOT persist across `&&` — each command is a
+#      subprocess. So `cargo` (installed by rustup to /root/.cargo/bin) is
+#      invisible to maturin unless we explicitly source rustup's env file.
+#   2. maturin calls `cargo` internally, so cargo must be on PATH even
+#      though we invoke maturin by its full pip-installed path.
+# Fix: `. "$HOME/.cargo/env"` (POSIX dot-source) before calling maturin.
 RUN set -eux; \
     if [ "$TARGETARCH" = "arm64" ]; then \
       curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal; \
+      . "$HOME/.cargo/env"; \
       /opt/conda/envs/pwesuite_env/bin/pip install maturin; \
-      git clone https://github.com/dmort27/rspanphon.git /tmp/rspanphon_src; \
+      git clone https://github.com/dmort27/panphon2.git /tmp/panphon2_src; \
       /opt/conda/envs/pwesuite_env/bin/maturin build --release \
-          --manifest-path /tmp/rspanphon_src/Cargo.toml \
+          --manifest-path /tmp/panphon2_src/Cargo.toml \
           --interpreter /opt/conda/envs/pwesuite_env/bin/python \
           --out /tmp/panphon2_wheels; \
       /opt/conda/envs/pwesuite_env/bin/pip install /tmp/panphon2_wheels/*.whl; \
-      rm -rf /tmp/rspanphon_src /tmp/panphon2_wheels; \
+      rm -rf /tmp/panphon2_src /tmp/panphon2_wheels; \
       /root/.cargo/bin/rustup self uninstall -y; \
     else \
       /opt/conda/envs/pwesuite_env/bin/pip install panphon2; \
