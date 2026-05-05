@@ -2,6 +2,8 @@
 """
 02_transcription.py
 ISS Task Transcription using WhisperX
+
+CLI flag --whisper_model overrides config["transcription"]["whisper_model"].
 """
 
 import argparse
@@ -75,6 +77,10 @@ def main():
     parser.add_argument("--audio_dir", required=True)
     parser.add_argument("--config", required=True)
     parser.add_argument("--output_dir", required=True)
+    parser.add_argument(
+        "--whisper_model", default=None,
+        help="Override the whisper model name from config (e.g. small, medium, large-v3)"
+    )
     args = parser.parse_args()
     
     config = load_config(args.config)
@@ -82,7 +88,8 @@ def main():
     
     # Load models
     device = config["transcription"].get("device", "cpu")
-    model_name = config["transcription"]["whisper_model"]
+    # CLI override takes priority over config
+    model_name = args.whisper_model or config["transcription"]["whisper_model"]
     language = config["transcription"]["language"]
     
     print(f"Loading WhisperX model: {model_name} on {device}")
@@ -125,10 +132,10 @@ def main():
         combined = pd.concat(all_transcriptions, ignore_index=True)
         output_combined = os.path.join(args.output_dir, f"{args.participant_id}_all_transcriptions.tsv")
         combined.to_csv(output_combined, sep="\t", index=False)
-        print(f"✓ Saved: {output_combined}")
-        print(f"✓ Total words: {len(combined)}")
+        print(f"\u2713 Saved: {output_combined}")
+        print(f"\u2713 Total words: {len(combined)}")
     else:
-        print("✗ No transcriptions generated")
+        print("\u2717 No transcriptions generated")
 
 if __name__ == "__main__":
     main()
