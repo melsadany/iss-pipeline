@@ -96,6 +96,14 @@ RUN cd /app && \
 # Update pwe_wrapper.py to reference the correct path
 ENV PYTHONPATH="/app/pwesuite"
 
+# Install missing pwesuite_env runtime dependencies needed by the preprocessor
+RUN /opt/conda/envs/pwesuite_env/bin/pip install \
+    scikit-learn \
+    datasets \
+    emoji \
+    epitran \
+    Levenshtein \
+    transformers
 
 # Install sentence-transformers in r_pipeline_env for semantic embeddings
 RUN /opt/conda/envs/r_pipeline_env/bin/pip install \
