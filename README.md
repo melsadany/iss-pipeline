@@ -1,339 +1,199 @@
-# Pipeline for Iowa Speech Sample (ISS) v.1.10.B
+# Iowa Speech Sample Pipeline — v1.10.B
 
-[![Docker](https://img.shields.io/badge/docker-ready-blue)](https://hub.docker.com/repository/docker/melsadany/iowa_speech_sample/) [![License](https://img.shields.io/badge/zenodo-green)](https://zenodo.org/records/18675411?token=eyJhbGciOiJIUzUxMiJ9.eyJpZCI6IjdjN2NlMzdhLTVmOTMtNDA5MS05NWNkLTdiNGU4MTFmMWI0YyIsImRhdGEiOnt9LCJyYW5kb20iOiJiNTEwZmUwZWY2ZmViODU5NTBmZDczYjZhMTZiZGMyYSJ9.UVUronrV_8iJAW_kiqGclwoejb_CE9lpjcfaNAnayoUfULjpTTQOqn1EM9E6KjgnnED771vqICz9DDz9HPCzwQ)
+[![Docker](https://img.shields.io/badge/docker-ready-blue)](https://hub.docker.com/repository/docker/melsadany/iowa_speech_sample/)
+[![Zenodo](https://img.shields.io/badge/zenodo-reference%20data-green)](https://zenodo.org/records/18675411)
 
-A fully containerized audio‑to‑feature pipeline designed for the **Iowa Speech Sample (ISS)**, version 1.10.B.\
-The pipeline processes recorded task audio, performs transcription with **WhisperX**, cleans the transcripts, and extracts a rich set of **linguistic, temporal, semantic, phonetic, and acoustic features** -- all orchestrated via Docker.
+A fully containerized audio-to-features pipeline for the **Iowa Speech Sample (ISS)**. Given a participant's task recording, the pipeline segments audio, transcribes with **WhisperX**, cleans transcripts, and extracts a rich set of linguistic, temporal, semantic, phonetic, and acoustic features — all inside a single Docker image with no manual environment setup.
 
 <img src="config/ISS_task_design.png" alt="ISS Task Design" width="800"/>
 
-------------------------------------------------------------------------
-
-## Table of Contents
-
--   [Overview](#overview)
--   [Features Extracted](#features-extracted)
--   [Requirements](#requirements)
--   [Recording the task](#recording-the-task)
--   [Quick Start](#quick-start)
--   [Running in interactive](#running-in-interactive)
--   [Configuration](#configuration)
--   [Reference Data](#reference-data)
--   [Outputs](#outputs)
--   [License & Citation](#license--citation)
-
-------------------------------------------------------------------------
-
-## Overview
-
-The **ISS (Iowa Speech Sample) Pipeline** automates the analysis of audio recordings from the ISS cognitive‑linguistic assessment. It:
-
--   Segments audio using a precise task template (CSV timestamps).
--   Transcribes each segment with **WhisperX** (word‑level alignment).
--   Cleans transcripts by removing fillers, repetitions, and low‑confidence words.
--   Extracts **per‑word** and **per‑prompt** features:
-    -   **General linguistic** (AoA, familiarity, concreteness, sentiment)
-    -   **Temporal** (response latencies, inter‑word intervals, burstiness)
-    -   **Semantic embedding** (sentence‑transformers, archetypes, spatial anchors)
-    -   **Phonetic embedding** (PWE, archetypes, norms)
-    -   **Task‑specific** (accuracy scores for memory, sentence repetition, reading)
-
-All computations run inside isolated **conda environments** (`whisperx_env`, `pwesuite_env`, `r_pipeline_env`) within a single Docker image -- no manual installation needed.
-
-------------------------------------------------------------------------
-
-## Features Extracted
-
-The pipeline outputs three levels of aggregated data:
-
-| Level               | Description                                                            |
-|-------------------------|-----------------------------------------------|
-| **Per‑prompt**      | Features for each prompt.                                              |
-| **Per‑task**        | Averages across prompts, grouped by task type (e.g., letter, lexical). |
-| **Per‑participant** | Single‑row summary for the entire session.                             |
-
-### Task‑Specific Metrics
-
--   **CHECKBOX & HI** -- hit rate, response latency.
--   **WORD_ASSOC** -- constraint adherence, semantic/phonetic diversity, archetype switches, productivity slope, bins statistics, etc.
--   **WMEMORY** -- recall accuracy (exact match, Levenshtein, phonological similarity, recall order).
--   **SENT_REP** -- word‑level and bigram accuracy, word order errors.
--   **READING** -- correctness per word, reading latency by valence.
-
-### Embedding‑Based Features
-
--   **Semantic** (384‑d from `all‑MiniLM‑L6‑v2`):
-    -   Similarity to prompt
-    -   Pairwise similarities (consecutive / all pairs)
-    -   Path length, TSP divergence
-    -   Archetype assignment (k=10) and area
-    -   Norms (distance from origin / anchors)
-    -   Similarity to config‑defined **spatial anchors** (visual, spatial, reasoning)
--   **Phonetic** (300‑d from PWESuite RNN metric learning model):
-    -   Same family of metrics (similarities, archetypes, norms)
-    -   High‑variance dimensions pre‑selected
-
-------------------------------------------------------------------------
+---
 
 ## Requirements
 
--   **Docker** (version 20.10+ recommended)
--   At least **8 GB RAM** (16 GB preferred for WhisperX large‑v3)
--   **Storage**: \~30 GB for the Docker image + reference data
+- **Docker** 20.10+
+- **8 GB RAM** minimum; 16 GB recommended (WhisperX large-v3)
+- **~30 GB** free disk space for the image and reference data
 
-------------------------------------------------------------------------
-
-## Recording the task
-
-A simple web app is provided to guide participants and record audio. This is what you need before running the Docker container or the scripts. I recommend doing the trial run of the app first before collecting your own task data.
-
-1.  **Clone the repository**
-
-    ``` bash
-    git clone https://github.com/melsadany/iss-pipeline.git
-    cd iss-pipeline
-    ```
-
-2.  Start a local web server in the `scripts/app/` directory:
-
-    ``` bash
-    cd scripts/app
-    python3 -m http.server 8000
-    ```
-
-3.  Open your browser to `http://localhost:8000`.
-
-    Make sure `task_video.mp4` (the ISS task video) is in the same folder.
-
-4.  Record the session following the same order below:
-
-    -   Click **"Enable Microphone"** and allow access.
-    -   Select **MP3** from the format dropdown.
-    -   Click **"Start task"** -- the video will play and recording begins automatically.
-    -   When the video ends, a download link appears (takes a few seconds). Click it to save `participant_audio.mp3`.
-
-5.  Rename the file (e.g., `participant_001.mp3`) and place it in your input folder.
-
-Now you have the audio ready for the pipeline.
-
-------------------------------------------------------------------------
+---
 
 ## Quick Start
 
-You have two options: use the pre‑built image from Docker Hub, or build the image locally from the source.
+### Pull and run
 
-### Using the Pre‑built Image from Docker Hub
+```bash
+# Pull the image
+docker pull melsadany/iowa_speech_sample:v1.0
 
-1.  **Pull the image**:
+# Create the expected directory layout
+mkdir -p input output/cropped_audio output/transcriptions output/review_files output/features
 
-    ``` bash
-    docker pull melsadany/iowa_speech_sample:v1.0
-    ```
+# Place your audio file
+mv YOUR_AUDIO_FILE.mp3 input/participant_audio.mp3
 
-2.  **Prepare your input**:
+# Run
+docker run --rm \
+    -v $(pwd)/input:/input \
+    -v $(pwd)/output:/app/output \
+    melsadany/iowa_speech_sample:v1.0 \
+    PARTICIPANT_ID \
+    /input/participant_audio.mp3
+```
 
-    Place your ISS audio file (MP3 or WAV) in a directory, e.g., `./input`
+Replace `PARTICIPANT_ID` with a session identifier (e.g., `SUBJ001`). Results appear in `output/features/`.
 
-2.  **Run the pipeline**:
+**Volume mounts:**
 
-    ``` bash
-    # build your directory
-    mkdir -p input output/cropped_audio output/transcriptions output/review_files output/features
-    mv YOUR_AUDIO_FILE.mp3 input/participant_audio.mp3
-    
-    docker run --rm \
-        -v $(pwd)/test_data:/input \
-        -v $(pwd)/output:/app/output \
-        melsadany/iowa_speech_sample:v1.0 \
-        PARTICIPANT_ID \
-        /input/participant_audio.mp3
-    ```
+| Mount | Purpose |
+|---|---|
+| `/input` | Directory containing the audio file |
+| `/app/output` | Pipeline outputs |
+| `/app/reference_data` | Reference data (optional — bundled defaults used if omitted) |
+| `/app/config` | Custom `task_template.yaml` (optional — bundled defaults used if omitted) |
 
-    Replace `PARTICIPANT_ID` with an identifier (e.g., SUBJ001)
+### Build from source
 
-    Explanation: The container expects two command-line arguments: participant ID and the full path to the audio file inside the container.
+```bash
+git clone https://github.com/melsadany/iss-pipeline.git
+cd iss-pipeline
+docker build -t iowa_speech_sample:local .
+```
 
-    Volumes mount your local directories to the expected paths inside the container:
-    -    `/input` -- where the audio file is located.\
-    -    `/app/output` -- where results will be written.\
-    -    `/app/reference_data` -- the reference data (optional, defaults are used if omitted).\
-    -    `/app/config` -- your task_template.yaml (optional, defaults are used if omitted).
+---
 
-    Results will appear in `./output/features/`.
+## Recording the Task
 
-------------------------------------------------------------------------
+A minimal browser app in `scripts/app/` guides participants and captures audio.
 
-## Running in Interactive/Debugging Mode
+```bash
+cd scripts/app
+python3 -m http.server 8000
+# open http://localhost:8000
+```
 
-By default, the Docker image is configured to run the entire pipeline when you start a container (the **ENTRYPOINT** is set to the main pipeline script). If you want to explore the container interactively, inspect intermediate files, or run the pipeline steps manually, you can override the entrypoint.
+Make sure `task_video.mp4` is in the same directory. In the app:
 
-1.  **Start a shell inside the container**:
+1. Click **Enable Microphone** and allow access.
+2. Select **MP3** from the format dropdown.
+3. Click **Start task** — the video plays and recording begins automatically.
+4. When the video ends, a download link appears. Save the file as `participant_audio.mp3`.
 
-    ``` bash
-    # build the same directory structure explained above
-    
-    docker run -it --rm --entrypoint /bin/bash \
-        -v $(pwd)/test_data:/input \
-        -v $(pwd)/output:/app/output \
-        melsadany/iowa_speech_sample:v1.0
-    ```
+---
 
-    If `/bin/bash` is not available (some minimal images use `sh`), try `/bin/sh` or `ash`.
-    
-    Once inside, you have access to all the pipeline code and environments.
+## Pipeline Stages
 
-2.  **Manually run the pipeline step by step**:
+| Stage | Script | Description |
+|---|---|---|
+| 1 | `run_01_audio_preprocessing.R` | Segments audio using task template timestamps |
+| 2 | `02_transcription.py` | Transcribes segments with WhisperX (word-level alignment) |
+| 3 | `run_03_transcription_cleanup.R` | Removes fillers, repetitions, and low-confidence words |
+| 4 | `run_04_feature_extraction.R` | Extracts all features; calls Python wrappers for embeddings |
 
-    The pipeline is organized into scripts. For example: 
+---
 
-    ``` bash
-    # Configuration
-    PARTICIPANT_ID=${1:-"TEST0001"}
-    AUDIO_FILE=${2:-"/input/test.mp3"}
-    CONFIG=${3:-"/app/config/task_template.yaml"}
-    OUTPUT_DIR="/app/output"
-    REFERENCE_DIR="/app/reference_data"
-    MODE="auto"
-    
-    echo "=========================================="
-    echo "ISS Pipeline - Participant: $PARTICIPANT_ID"
-    echo "=========================================="
-    
-    # Stage 1: Audio Preprocessing (R)
-    echo "[Stage 1] Audio Preprocessing..."
-    /opt/conda/bin/conda run --no-capture-output -n r_pipeline_env \
-      Rscript /app/scripts/run_01_audio_preprocessing.R \
-        --audio "$AUDIO_FILE" \
-        --id "$PARTICIPANT_ID" \
-        --config "$CONFIG" \
-        --output "$OUTPUT_DIR/cropped_audio"
-    
-    # Stage 2: Transcription (Python with WhisperX)
-    echo "[Stage 2] Transcription..."
-    /opt/conda/bin/conda run --no-capture-output -n whisperx_env \
-      python /app/scripts/02_transcription.py \
-        --participant_id "$PARTICIPANT_ID" \
-        --audio_dir "$OUTPUT_DIR/cropped_audio/$PARTICIPANT_ID" \
-        --config "$CONFIG" \
-        --output_dir "$OUTPUT_DIR/transcriptions/$PARTICIPANT_ID"
-    
-    # Stage 3: Transcription Cleanup (R)
-    echo "[Stage 3] Transcription Cleanup..."
-    /opt/conda/bin/conda run --no-capture-output -n r_pipeline_env \
-      Rscript /app/scripts/run_03_transcription_cleanup.R \
-        --id "$PARTICIPANT_ID" \
-        --transcription_file "$OUTPUT_DIR/transcriptions/$PARTICIPANT_ID/${PARTICIPANT_ID}_all_transcriptions.tsv" \
-        --mode "$MODE" \
-        --config "$CONFIG" \
-        --reference "$REFERENCE_DIR" \
-        --output "$OUTPUT_DIR"
-    
-    # Stage 4: Feature Extraction (R + Python wrappers)
-    echo "[Stage 4] Feature Extraction..."
-    /opt/conda/bin/conda run --no-capture-output -n r_pipeline_env \
-      Rscript /app/scripts/run_04_feature_extraction.R \
-        --id "$PARTICIPANT_ID" \
-        --transcription_file "$OUTPUT_DIR/review_files/${PARTICIPANT_ID}_cleaned_transcription.tsv" \
-        --config "$CONFIG" \
-        --reference "$REFERENCE_DIR" \
-        --output "$OUTPUT_DIR/features"
-    
-    echo "===================================="
-    echo "Pipeline Complete!"
-    echo "Results: $OUTPUT_DIR/features/${PARTICIPANT_ID}_per_participant.csv"
-    echo "=========================================="
-    ```
-    Refer to the source code in `/app/scripts/` for exact usage. You can run these commands sequentially, inspect outputs at each stage, and modify parameters as needed.
+## Features Extracted
 
-3.  **Copy files in/out of the container**:
+Features are aggregated at three levels:
 
-    While the container is running (in another terminal), you can use docker cp to transfer files. For example:
-    
-    ``` bash
-    # From host, copy a file into the running container
-    docker cp local_file.txt <container_id>:/path/in/container/
-    
-    # From container to host
-    docker cp <container_id>:/app/output/intermediate_file.csv .
-    ```
-    
-    To get the container ID, run `docker ps` while the interactive session is active.
+| Level | Description |
+|---|---|
+| **Per-prompt** | Features for each prompt |
+| **Per-task** | Averages across prompts, grouped by task type |
+| **Per-participant** | Single-row summary for the full session |
 
+**Task-specific metrics:**
+- **CHECKBOX & HI** — hit rate, response latency
+- **WORD_ASSOC** — constraint adherence, semantic/phonetic diversity, archetype switches, productivity slope, bin statistics
+- **WMEMORY** — recall accuracy (exact match, Levenshtein, phonological similarity, recall order)
+- **SENT_REP** — word-level and bigram accuracy, word order errors
+- **READING** — correctness per word, reading latency by valence
 
-------------------------------------------------------------------------
+**Embedding-based features:**
+- **Semantic** (384-d, `all-MiniLM-L6-v2`) — prompt similarity, pairwise similarities, path length, TSP divergence, archetype assignment and area, spatial anchor similarity (visual, spatial, reasoning)
+- **Phonetic** (300-d, PWESuite RNN) — same family of metrics; high-variance dimensions pre-selected
+
+---
 
 ## Configuration
 
-All pipeline parameters are controlled by a single YAML file: `config/task_template.yaml`. Key sections:
+All pipeline parameters live in `config/task_template.yaml`. Key sections:
 
--   `task_settings`: response windows, valid words for CHECKBOX/HI, constraint rules for WORD_ASSOC.
--   `transcription`: WhisperX model name (`large‑v3`), confidence thresholds, filler lists.
--   `ground_truth`: target sentences for SENT_REP and the reading word list with valence.
--   `features`: switches to enable/disable acoustic, semantic, phonetic, linguistic, and temporal feature groups.
--   `spatial_anchors`: user‑defined word lists for similarity calculations (visual, spatial, reasoning).
--   `output`: what to save (per‑trial, per‑task, per‑participant).
+| Section | Controls |
+|---|---|
+| `task_settings` | Response windows, valid words (CHECKBOX/HI), constraint rules (WORD_ASSOC) |
+| `transcription` | WhisperX model name, confidence thresholds, filler word lists |
+| `ground_truth` | Target sentences for SENT_REP; reading word list with valence |
+| `features` | Enable/disable acoustic, semantic, phonetic, linguistic, temporal groups |
+| `spatial_anchors` | User-defined word lists for similarity calculations |
+| `output` | What to save (per-trial, per-task, per-participant) |
 
-Edit this file to adapt the pipeline to different task versions or to enable/disable specific feature sets.
-
-------------------------------------------------------------------------
+---
 
 ## Reference Data
 
-The pipeline relies on pre‑computed resources located in `reference_data/.`
+Pre-computed resources required by the pipeline are available on Zenodo:
 
-A pre‑built archive containing all necessary reference data is available for download:
+**Download:** <https://zenodo.org/records/18675411>
 
--   **Download link**: <https://zenodo.org/records/18675411>
+| Directory | Contents |
+|---|---|
+| `embeddings/` | Semantic and phonetic embeddings for ~50k common words |
+| `archetypes/` | Pre-computed archetype models (semantic and phonetic) |
+| `linguistic/` | AoA, GPT familiarity, MRC, concreteness datasets |
+| `task_metadata/` | ISS task template CSV |
 
-The archive includes:
-
--   `embeddings/` -- semantic and phonetic embeddings for \~50k common words
--   `archetypes/` -- pre‑computed archetype models (semantic and phonetic)
--   `linguistic/` -- AoA, GPT familiarity, MRC, concreteness datasets
--   `task_metadata/` -- ISS task template CSV
-
-------------------------------------------------------------------------
+---
 
 ## Outputs
 
-  After a successful run, the `output/` directory contains:
+```text
+output/
+├── cropped_audio/<participant_id>/          # WAV segments
+├── transcriptions/<participant_id>/         # Raw WhisperX TSV files
+├── review_files/
+│   ├── <participant_id>_cleaned_transcription.tsv
+│   └── <participant_id>_REVIEW_REQUIRED.xlsx   # only if flagged
+└── features/
+    ├── <participant_id>_transcription_cleaning_stats.rds
+    ├── <participant_id>_tasks-minimal-features.rds
+    ├── <participant_id>_per_prompt.rds
+    ├── <participant_id>_per_task.rds
+    ├── <participant_id>_per_participant.rds
+    └── <participant_id>_all_features.rds
+```
 
-  ``` text
-    output/
-    ├── cropped_audio/
-    │   └── <participant_id>/          # WAV segments
-    ├── transcriptions/
-    │   └── <participant_id>/          # Raw WhisperX TSV files
-    ├── review_files/
-    │   ├── <participant_id>_cleaned_transcription.tsv
-    │   └── (optionally) ..._REVIEW_REQUIRED.xlsx
-    └── features/
-        ├── <participant_id>_transcription_cleaning_stats.rds
-        ├── <participant_id>_tasks-minimal-features.rds
-        ├── <participant_id>_per_prompt.rds
-        ├── <participant_id>_per_task.rds
-        ├── <participant_id>_per_participant.rds
-        └── <participant_id>_all_features.rds
-  ```
+Most useful for downstream analysis:
+- `*_per_participant.rds` — one row per participant with all aggregated scores
+- `*_per_prompt.rds` — item-level data for each fluency prompt
+- `*_per_task.rds` — one row per task type per participant
 
-The most useful for downstream analysis are:
+Convert RDS files with `readRDS()` in R or `pyreadr` in Python.
 
--   `*_per_participant.rds` -- one row per participant with all aggregated scores.
--   `*_per_prompt.rds` -- detailed data for each fluency prompt, useful for item‑level analysis.
--   `*_per_task.rds` -- one row per task type per participant with all aggregated scores.
+---
 
-You can convert these RDS files to CSV using `readRDS()` in R or `pyreadr` in Python.
+## Interactive / Debugging Mode
 
-------------------------------------------------------------------------
+Override the entrypoint to get a shell inside the container:
 
-## License & Citation
+```bash
+docker run -it --rm --entrypoint /bin/bash \
+    -v $(pwd)/input:/input \
+    -v $(pwd)/output:/app/output \
+    melsadany/iowa_speech_sample:v1.0
+```
 
-This pipeline is released under the MIT License. If you use it in your research, please cite:
+Pipeline scripts are in `/app/scripts/`. Each stage can be run manually — see the stage table above for script names and the source code for exact argument usage.
 
-    [hj]
+---
 
-Maintainer: Muhammad Elsadany \
-[email](mailto:melsadany24@gmail.com) - 
-[Repository link](https://github.com/melsadany/iss-pipeline) - 
-[Docker](https://hub.docker.com/repository/docker/melsadany/iowa_speech_sample/) -  [Zenodo](https://zenodo.org/records/18675411?token=eyJhbGciOiJIUzUxMiJ9.eyJpZCI6IjdjN2NlMzdhLTVmOTMtNDA5MS05NWNkLTdiNGU4MTFmMWI0YyIsImRhdGEiOnt9LCJyYW5kb20iOiJiNTEwZmUwZWY2ZmViODU5NTBmZDczYjZhMTZiZGMyYSJ9.UVUronrV_8iJAW_kiqGclwoejb_CE9lpjcfaNAnayoUfULjpTTQOqn1EM9E6KjgnnED771vqICz9DDz9HPCzwQ)
+## Related
 
+- Desktop app: <https://github.com/melsadany/iss-desktop-app>
+- Docker image: <https://hub.docker.com/r/melsadany/iowa_speech_sample>
+- Reference data: <https://zenodo.org/records/18675411>
+
+---
+
+## License
+
+MIT. Maintainer: Muhammad Elsadany — [melsadany24@gmail.com](mailto:melsadany24@gmail.com)
