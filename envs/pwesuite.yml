@@ -9,3 +9,5 @@ dependencies:
       - torch
       - pandas
       - tqdm
+      - numpy
+      - scikit-learn
