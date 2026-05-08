@@ -4,9 +4,13 @@
 
 required_packages <- c("optparse", "yaml", "logger", "tidyverse", "logging", "stringdist")
 for (pkg in required_packages) {
-  if (!require(pkg, character.only = TRUE, quietly = TRUE)) {
+  if (!suppressWarnings(suppressPackageStartupMessages(
+        require(pkg, character.only = TRUE, quietly = TRUE)
+      ))) {
     install.packages(pkg, repos = "https://cloud.r-project.org")
-    suppressWarnings(suppressPackageStartupMessages({library(pkg, character.only = TRUE)}))
+    suppressWarnings(suppressPackageStartupMessages(
+      library(pkg, character.only = TRUE)
+    ))
   }
 }
 
@@ -390,6 +394,6 @@ write_rds(
   compress = "gz"
 )
 
-log_info("  \u2713 Transcription cleaned")
-log_info("  \u2713 {nrow(cleanup_results$clean_tx)} valid responses retained")
-log_info("\u2713 Stage 3 Complete")
+log_info("  ✓ Transcription cleaned")
+log_info("  ✓ {nrow(cleanup_results$clean_tx)} valid responses retained")
+log_info("✓ Stage 3 Complete")

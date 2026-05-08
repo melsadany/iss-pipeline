@@ -1,18 +1,21 @@
 #!/usr/bin/env Rscript
 
-
 required_packages <- c("optparse", "yaml", "logger", "tidyverse", "tuneR", "logging")
 for (pkg in required_packages) {
-  if (!require(pkg, character.only = TRUE, quietly = TRUE)) {
+  if (!suppressWarnings(suppressPackageStartupMessages(
+        require(pkg, character.only = TRUE, quietly = TRUE)
+      ))) {
     log_warn("Package {pkg} not installed. Installing...")
     install.packages(pkg, repos = "https://cloud.r-project.org")
-    suppressWarnings(suppressPackageStartupMessages({library(pkg, character.only = TRUE)}))
+    suppressWarnings(suppressPackageStartupMessages(
+      library(pkg, character.only = TRUE)
+    ))
   }
 }
 
-# opt = list(audio="/input/test.mp3", id="TEST0001", 
-#            config="config/task_template.yaml", 
-#            output="output/cropped_audio/", 
+# opt = list(audio="/input/test.mp3", id="TEST0001",
+#            config="config/task_template.yaml",
+#            output="output/cropped_audio/",
 #            reference_dir="reference_data/", mode="auto")
 # script_dir = "scripts"
 

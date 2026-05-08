@@ -2,10 +2,14 @@
 
 required_packages <- c("optparse", "yaml", "logger", "tidyverse", "logging", "phonics")
 for (pkg in required_packages) {
-  if (!require(pkg, character.only = TRUE, quietly = TRUE)) {
+  if (!suppressWarnings(suppressPackageStartupMessages(
+        require(pkg, character.only = TRUE, quietly = TRUE)
+      ))) {
     log_warn("Package {pkg} not installed. Installing...")
     install.packages(pkg, repos = "https://cloud.r-project.org")
-    suppressWarnings(suppressPackageStartupMessages({library(pkg, character.only = TRUE)}))
+    suppressWarnings(suppressPackageStartupMessages(
+      library(pkg, character.only = TRUE)
+    ))
   }
 }
 
