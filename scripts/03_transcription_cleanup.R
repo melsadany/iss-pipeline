@@ -9,6 +9,91 @@ suppressPackageStartupMessages({
   library(logging)
 })
 
+# ---------------------------------------------------------------------------
+# Per-task cleaner helpers
+# These are intentionally conservative: they keep the same row structure but
+# attach task-specific summaries and minimal per-trial flags, so downstream
+# code can compute features without requiring a separate implementation file.
+# ---------------------------------------------------------------------------
+
+clean_checkbox <- function(tx, cfg) {
+  # Ensure required columns
+  stopifnot(all(c("participant_id","task","audio_file","prompt","trial","response") %in% names(tx)))
+  tx <- tx %>% arrange(participant_id, audio_file, trial)
+  tx %>%
+    group_by(participant_id, audio_file, prompt, trial) %>%
+    summarise(
+      n_clicks   = dplyr::n(),
+      first_time = min(start, na.rm = TRUE),
+      last_time  = max(end,   na.rm = TRUE),
+      .groups    = "drop"
+    )
+}
+
+clean_hi <- function(tx, cfg) {
+  stopifnot(all(c("participant_id","task","audio_file","prompt","trial","response") %in% names(tx)))
+  tx <- tx %>% arrange(participant_id, audio_file, trial, start)
+  tx %>%
+    group_by(participant_id, audio_file, prompt, trial) %>%
+    summarise(
+      n_tokens   = dplyr::n(),
+      duration   = max(end, na.rm = TRUE) - min(start, na.rm = TRUE),
+      mean_gap   = ifelse(dplyr::n() > 1,
+                          mean(diff(sort(start)), na.rm = TRUE),
+                          NA_real_),
+      .groups    = "drop"
+    )
+}
+
+clean_word_assoc <- function(tx, cfg) {
+  stopifnot(all(c("participant_id","task","audio_file","prompt","trial","response") %in% names(tx)))
+  tx <- tx %>% arrange(participant_id, audio_file, prompt, trial, start)
+  tx %>%
+    group_by(participant_id, audio_file, prompt) %>%
+    summarise(
+      n_words     = dplyr::n(),
+      first_onset = min(start, na.rm = TRUE),
+      last_offset = max(end,   na.rm = TRUE),
+      .groups     = "drop"
+    )
+}
+
+clean_wmemory <- function(tx, word_assoc_clean, cfg) {
+  stopifnot(all(c("participant_id","task","audio_file","prompt","trial","response") %in% names(tx)))
+  tx <- tx %>% arrange(participant_id, audio_file, trial)
+  tx %>%
+    group_by(participant_id, audio_file, trial) %>%
+    summarise(
+      n_items   = dplyr::n(),
+      duration  = max(end, na.rm = TRUE) - min(start, na.rm = TRUE),
+      .groups   = "drop"
+    )
+}
+
+clean_sent_rep <- function(tx, cfg) {
+  stopifnot(all(c("participant_id","task","audio_file","prompt","trial","response") %in% names(tx)))
+  tx <- tx %>% arrange(participant_id, audio_file, trial, start)
+  tx %>%
+    group_by(participant_id, audio_file, prompt, trial) %>%
+    summarise(
+      n_tokens  = dplyr::n(),
+      duration  = max(end, na.rm = TRUE) - min(start, na.rm = TRUE),
+      .groups   = "drop"
+    )
+}
+
+clean_reading <- function(tx, cfg) {
+  stopifnot(all(c("participant_id","task","audio_file","prompt","trial","response") %in% names(tx)))
+  tx <- tx %>% arrange(participant_id, audio_file, trial, start)
+  tx %>%
+    group_by(participant_id, audio_file, trial) %>%
+    summarise(
+      n_tokens  = dplyr::n(),
+      duration  = max(end, na.rm = TRUE) - min(start, na.rm = TRUE),
+      .groups   = "drop"
+    )
+}
+
 #' Main cleanup function
 cleanup_transcription <- function(transcription, participant_id, config, mode = "auto", output_dir) {
   
