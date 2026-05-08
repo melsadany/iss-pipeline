@@ -141,7 +141,7 @@ run_stage_4() {
       --transcription_file "$OUTPUT_DIR/review_files/${PARTICIPANT_ID}_cleaned_transcription.tsv" \
       --config    "$CONFIG" \
       --reference "$REFERENCE_DIR" \
-      --output    "$OUTPUT_DIR/features"
+      --output    "$OUTPUT_DIR"
   echo "[Stage 4] Done."
 }
 
