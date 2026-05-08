@@ -11,6 +11,8 @@ set -euo pipefail
 #   --stage {1|2|3|4|all}   Which stage(s) to run (default: all)
 #   --whisper-model <name>  Override whisper model in config
 #                           (e.g. small, medium, large-v3)
+#   --force-auto-cleanup    Force stage 3 to re-run automatic cleanup
+#                           even if a reviewed TSV already exists
 #
 # Stage map:
 #   1 = Audio Preprocessing (R)
@@ -28,6 +30,7 @@ REFERENCE_DIR="/app/reference_data"
 # Defaults
 STAGE="all"
 WHISPER_MODEL_OVERRIDE=""
+FORCE_AUTO_CLEANUP=0
 
 # Parse extra options (starting from arg 4)
 shift 3 2>/dev/null || true
@@ -40,6 +43,10 @@ while [[ $# -gt 0 ]]; do
     --whisper-model)
       WHISPER_MODEL_OVERRIDE="$2"
       shift 2
+      ;;
+    --force-auto-cleanup)
+      FORCE_AUTO_CLEANUP=1
+      shift
       ;;
     *)
       shift
@@ -97,6 +104,22 @@ run_stage_2() {
 # ---- helper: run_stage_3 ----
 run_stage_3() {
   echo "[Stage 3] Transcription Cleanup..."
+
+  REVIEWED_TSV="$OUTPUT_DIR/review_files/${PARTICIPANT_ID}_cleaned_transcription.tsv"
+  REVIEWED_ARG=""
+
+  if [[ "$FORCE_AUTO_CLEANUP" -eq 0 ]] && [[ -f "$REVIEWED_TSV" ]]; then
+    echo "  [Stage 3] Reviewed TSV found — using manual review edits."
+    echo "            ($REVIEWED_TSV)"
+    REVIEWED_ARG="--reviewed_tsv $REVIEWED_TSV"
+  else
+    if [[ "$FORCE_AUTO_CLEANUP" -eq 1 ]]; then
+      echo "  [Stage 3] --force-auto-cleanup set — running automatic cleanup from scratch."
+    else
+      echo "  [Stage 3] No reviewed TSV found — running automatic cleanup."
+    fi
+  fi
+
   /opt/conda/bin/conda run --no-capture-output -n r_pipeline_env \
     Rscript /app/scripts/run_03_transcription_cleanup.R \
       --id   "$PARTICIPANT_ID" \
@@ -104,7 +127,8 @@ run_stage_3() {
       --mode   auto \
       --config "$CONFIG" \
       --reference "$REFERENCE_DIR" \
-      --output    "$OUTPUT_DIR"
+      --output    "$OUTPUT_DIR" \
+      $REVIEWED_ARG
   echo "[Stage 3] Done."
 }
 
