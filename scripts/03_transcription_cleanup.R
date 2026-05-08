@@ -517,3 +517,163 @@ clean_reading <- function(tx_reading, cfg) {
   
   return(tx_reading3)
 }
+
+# =============================================================================
+# MULTI-REVIEWER CONSENSUS HELPERS
+# =============================================================================
+
+#' Select the most-recent review file for each unique rater.
+#'
+#' @param review_files  Character vector of full paths to review TSV files.
+#'                      Expected filename pattern:
+#'                      <participant_id>_review_<INITIALS>_<YYYYMMDDTHHMM>.tsv
+#' @param participant_id  Participant ID string (used to build the regex).
+#' @return Named list: names = initials (upper-case), values = file paths.
+get_latest_per_rater <- function(review_files, participant_id) {
+  pat <- paste0("^", participant_id, "_review_([A-Za-z0-9]+)_(\\d{8}T\\d{4})\\.tsv$")
+  result <- list()
+  for (fp in review_files) {
+    bn  <- basename(fp)
+    m   <- regmatches(bn, regexec(pat, bn))[[1]]
+    if (length(m) < 3) next
+    initials  <- toupper(m[2])
+    timestamp <- m[3]
+    if (is.null(result[[initials]]) ||
+        timestamp > attr(result[[initials]], "timestamp")) {
+      result[[initials]] <- fp
+      attr(result[[initials]], "timestamp") <- timestamp
+    }
+  }
+  return(result)
+}
+
+#' Compute consensus across multiple reviewer TSV files against the raw stage-2
+#' TSV. Each reviewer file must have the same columns as the raw TSV plus the
+#' review-specific columns: response, drop, comment.
+#'
+#' Consensus rules (applied per row, keyed by audio_file + start):
+#'   response  - majority-vote text; ties resolved by keeping the raw word value
+#'   drop      - majority-vote boolean; ties resolve to FALSE (keep the row)
+#'   comment   - union of all non-empty, non-NA values, pipe-separated
+#'
+#' @param raw_tsv      data.frame — the stage-2 transcription (ground truth keys)
+#' @param rater_files  Named list from get_latest_per_rater()
+#' @return data.frame with same columns as raw_tsv plus response / drop / comment
+compute_consensus <- function(raw_tsv, rater_files) {
+
+  n_raters <- length(rater_files)
+  if (n_raters == 0) stop("compute_consensus called with no rater files")
+
+  # Helper: read one review file and normalise boolean columns
+  norm_bool <- function(x) {
+    if (is.logical(x)) return(x)
+    toupper(trimws(as.character(x))) %in% c("TRUE", "1", "YES")
+  }
+
+  read_review <- function(fp, initials) {
+    df <- read_tsv(fp, show_col_types = FALSE)
+    if (!"drop"    %in% names(df)) df$drop    <- FALSE
+    if (!"comment" %in% names(df)) df$comment <- NA_character_
+    if (!"response" %in% names(df)) {
+      if ("word" %in% names(df)) df$response <- df$word
+      else df$response <- NA_character_
+    }
+    df <- df %>%
+      mutate(
+        drop    = norm_bool(drop),
+        comment = as.character(comment),
+        comment = ifelse(is.na(comment) | trimws(comment) == "" |
+                           toupper(trimws(comment)) %in% c("FALSE", "NA"), NA_character_, comment),
+        .rater  = initials
+      )
+    return(df)
+  }
+
+  # Build a row key from the raw TSV (audio_file + start; both should be stable)
+  key_col <- function(df) paste(df$audio_file, df$start, sep = "::")
+
+  raw_keys <- key_col(raw_tsv)
+
+  # Accumulate votes per key
+  vote_response <- vector("list", length(raw_keys))
+  vote_drop     <- vector("list", length(raw_keys))
+  vote_comment  <- vector("list", length(raw_keys))
+  names(vote_response) <- raw_keys
+  names(vote_drop)     <- raw_keys
+  names(vote_comment)  <- raw_keys
+
+  for (i in seq_along(rater_files)) {
+    initials <- names(rater_files)[i]
+    fp       <- rater_files[[i]]
+    tryCatch({
+      df   <- read_review(fp, initials)
+      keys <- key_col(df)
+      for (j in seq_len(nrow(df))) {
+        k <- keys[j]
+        if (!k %in% raw_keys) next  # skip rows that don't match the raw TSV
+        vote_response[[k]] <- c(vote_response[[k]], df$response[j])
+        vote_drop[[k]]     <- c(vote_drop[[k]],     df$drop[j])
+        vote_comment[[k]]  <- c(vote_comment[[k]],  df$comment[j])
+      }
+    }, error = function(e) {
+      log_warn(sprintf("  compute_consensus: could not read %s (%s)", fp, e$message))
+    })
+  }
+
+  # Majority-vote helpers
+  majority_text <- function(votes, fallback) {
+    votes <- votes[!is.na(votes)]
+    if (length(votes) == 0) return(fallback)
+    tbl <- sort(table(votes), decreasing = TRUE)
+    top_count <- tbl[[1]]
+    top_vals  <- names(tbl[tbl == top_count])
+    if (length(top_vals) == 1) return(top_vals)
+    return(fallback)  # tie -> keep raw value
+  }
+
+  majority_bool <- function(votes) {
+    votes <- votes[!is.na(votes)]
+    if (length(votes) == 0) return(FALSE)
+    sum(votes) > (length(votes) / 2)  # strict majority; tie -> FALSE
+  }
+
+  union_comments <- function(votes) {
+    vals <- unique(votes[!is.na(votes)])
+    if (length(vals) == 0) return(NA_character_)
+    paste(vals, collapse = " | ")
+  }
+
+  # Build consensus columns aligned to raw_tsv row order
+  consensus_response <- character(nrow(raw_tsv))
+  consensus_drop     <- logical(nrow(raw_tsv))
+  consensus_comment  <- character(nrow(raw_tsv))
+
+  raw_word_col <- if ("word" %in% names(raw_tsv)) raw_tsv$word else
+                  if ("response" %in% names(raw_tsv)) raw_tsv$response else
+                  rep(NA_character_, nrow(raw_tsv))
+
+  for (j in seq_len(nrow(raw_tsv))) {
+    k <- raw_keys[j]
+    consensus_response[j] <- majority_text(vote_response[[k]], raw_word_col[j])
+    consensus_drop[j]     <- majority_bool(vote_drop[[k]])
+    consensus_comment[j]  <- union_comments(vote_comment[[k]])
+  }
+
+  # Attach consensus columns to a copy of the raw TSV
+  out <- raw_tsv %>%
+    mutate(
+      response = consensus_response,
+      drop     = consensus_drop,
+      comment  = consensus_comment
+    )
+
+  log_info(sprintf(
+    "  compute_consensus: %d rater(s), %d rows — drop flagged: %d, rows with comments: %d",
+    n_raters,
+    nrow(out),
+    sum(out$drop),
+    sum(!is.na(out$comment))
+  ))
+
+  return(out)
+}
