@@ -103,7 +103,7 @@ extract_all_features_iss <- function(cleaned_transcription,
                           word_assoc = word_assoc_features$per_participant)
   
   
-  loginfo("✓ Feature extraction complete")
+  loginfo("\u2713 Feature extraction complete")
   
   return(list(input = cleaned_transcription,
               all_features_start = all_features,
@@ -159,9 +159,14 @@ extract_word_assoc_features <- function(tx, embeddings, archetype_refs,
     logdebug("  Extracting phonetic embeddings for %d novel words",
              length(novel_phonetic_words))
     new_pwe_emb <- extract_phonetic_embeddings(novel_phonetic_words)
-    embeddings$phonetic <- rbind(embeddings$phonetic, 
-                                 new_pwe_emb %>% rename_at(.vars = vars(-text),.funs = function(x) paste0("Dim",as.numeric(x)+1)))%>%
-      distinct(text,.keep_all = T)
+    if (!is.null(new_pwe_emb)) {
+      embeddings$phonetic <- rbind(
+        embeddings$phonetic,
+        new_pwe_emb %>% rename_at(.vars = vars(-text), .funs = function(x) paste0("Dim", as.numeric(x) + 1))
+      ) %>% distinct(text, .keep_all = TRUE)
+    } else {
+      logwarn("  PWE extraction returned NULL for novel words; skipping — using pre-computed phonetic embeddings only")
+    }
   }
   
   phonetic_features <- extract_embedding_features(
@@ -1372,7 +1377,7 @@ calculate_anchor_set_similarity <- function(tx_split, emb_matrix, prefix = "sem"
     return(NULL)
   }
   
-  # All anchor–response pairs
+  # All anchor-response pairs
   pairs <- expand.grid(
     w1 = anchors_meta$text,
     w2 = valid_responses,
@@ -1405,7 +1410,7 @@ calculate_anchor_set_similarity <- function(tx_split, emb_matrix, prefix = "sem"
       relationship = "many-to-many"
     )
   
-  # Aggregate: max similarity per participant × prompt × category
+  # Aggregate: max similarity per participant x prompt x category
   per_prompt <- anchor_sim %>%
     dplyr::group_by(participant_id, prompt, anchor_category) %>%
     dplyr::summarise(
