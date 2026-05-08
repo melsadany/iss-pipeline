@@ -60,6 +60,87 @@ log_appender(appender_console)
 source(file.path(script_dir, "00_initialize.R"))
 source(file.path(script_dir, "03_transcription_cleanup.R"))
 
+# ---------------------------------------------------------------------------
+# Helper functions for multi-rater support
+# ---------------------------------------------------------------------------
+
+# Given a vector of review file paths like
+#   /.../SUB0001_review_MES_20260508T1542.tsv
+# return a named list with the latest file per rater initials.
+get_latest_per_rater <- function(files, id) {
+  if (!length(files)) return(list())
+  basenames <- basename(files)
+  # expected pattern: <id>_review_<INITIALS>_<YYYYMMDDTHHMM>.tsv
+  # use a permissive split and keep the token after 'review'
+  parts <- strsplit(basenames, "_")
+  initials <- vapply(parts, function(p) {
+    idx <- which(p == "review")
+    if (length(idx) && length(p) >= idx + 1) p[idx + 1] else NA_character_
+  }, character(1))
+  timestamps <- sub("\\.tsv$", "", vapply(parts, function(p) tail(p, 1), character(1)))
+
+  df <- tibble::tibble(file = files, initials = initials, ts = timestamps)
+  df <- df[!is.na(df$initials) & nzchar(df$initials), , drop = FALSE]
+  if (!nrow(df)) return(list())
+
+  df <- df %>% dplyr::group_by(initials) %>%
+    dplyr::slice_max(order_by = ts, n = 1, with_ties = FALSE) %>%
+    dplyr::ungroup()
+
+  out <- as.list(df$file)
+  names(out) <- df$initials
+  out
+}
+
+# Compute a simple consensus file given the raw transcription and a set of
+# per-rater TSV review files that share the same columns as the "raw" export
+# plus reviewer-specific columns (e.g., drop/comment). For now we use the
+# most common decision per row across raters when possible, otherwise fall
+# back to the latest rater for ties.
+compute_consensus <- function(raw_tsv, rater_files) {
+  if (!length(rater_files)) return(raw_tsv)
+
+  # read all rater files
+  rater_dfs <- lapply(rater_files, readr::read_tsv, show_col_types = FALSE)
+
+  # assume they all have the same number/order of rows as raw_tsv
+  # and at least the columns: participant_id, task, audio_file, prompt, word
+  # plus optional drop/comment columns.
+  base <- raw_tsv
+
+  # Collect drop/comment decisions if present
+  drop_mat    <- list()
+  comment_mat <- list()
+  for (nm in names(rater_dfs)) {
+    df <- rater_dfs[[nm]]
+    if ("drop" %in% names(df))    drop_mat[[nm]]    <- df$drop    else drop_mat[[nm]]    <- rep(NA, nrow(df))
+    if ("comment" %in% names(df)) comment_mat[[nm]] <- df$comment else comment_mat[[nm]] <- rep(NA, nrow(df))
+  }
+
+  drop_mat    <- as.data.frame(drop_mat, stringsAsFactors = FALSE)
+  comment_mat <- as.data.frame(comment_mat, stringsAsFactors = FALSE)
+
+  # Majority vote for drop, latest non-NA comment
+  majority_drop <- apply(drop_mat, 1, function(x) {
+    x <- toupper(trimws(as.character(x)))
+    x <- x[x %in% c("TRUE", "FALSE", "1", "0", "YES", "NO")]
+    if (!length(x)) return(NA_character_)
+    # treat TRUE/1/YES as TRUE, others as FALSE
+    bool <- x %in% c("TRUE", "1", "YES")
+    if (sum(bool) > length(bool) / 2) "TRUE" else "FALSE"
+  })
+
+  latest_comment <- apply(comment_mat, 1, function(x) {
+    x <- as.character(x)
+    x <- x[!is.na(x) & nzchar(trimws(x))]
+    if (!length(x)) NA_character_ else tail(x, 1)
+  })
+
+  base$drop    <- majority_drop
+  base$comment <- latest_comment
+  base
+}
+
 config <- yaml::read_yaml(opt$config)
 
 log_info("STAGE 3: Transcription Cleanup")
