@@ -221,11 +221,17 @@ run_task_cleaners <- function(tx_clean, config) {
 #   3. No review at all → automatic cleanup_transcription()
 # ===========================================================================
 
-# Resolve effective review directory (prefer --review_dir over legacy)
-effective_review_dir <- if (!is.null(opt$review_dir) && nchar(opt$review_dir) > 0)
-  opt$review_dir
-else
-  file.path(opt$output, "review_files")  # default search location
+# Resolve effective review directory (prefer --review_dir over legacy).
+# NOTE: braces around the if/else are required — bare multi-line if/else at
+# the top level of an Rscript causes an 'unexpected else' parse error when
+# the condition is FALSE and the 'if' result falls on a separate line.
+effective_review_dir <- {
+  if (!is.null(opt$review_dir) && nchar(opt$review_dir) > 0) {
+    opt$review_dir
+  } else {
+    file.path(opt$output, "review_files")  # default search location
+  }
+}
 
 # Glob per-rater files
 all_review_files <- list.files(
