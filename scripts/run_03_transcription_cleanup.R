@@ -63,10 +63,20 @@ log_info(strrep("-", 80))
 system(paste0("mkdir -p ", file.path(opt$output, "review_files")))
 system(paste0("mkdir -p ", file.path(opt$output, "features")))
 
+# Path to the frozen auto-cleanup stats (written once, never overwritten)
+auto_stats_path <- file.path(opt$output, "features",
+                             paste0(opt$id, "_auto_cleaning_stats.rds"))
+
 # ─────────────────────────────────────────────────────────────────────────────
 # REVIEWED PATH: user has already edited the TSV in the desktop app.
 # We read it, apply the drop/comment columns they set, then derive the same
 # outputs that the automatic path produces so stage 4 is unaffected.
+#
+# STATS STRATEGY: ums / repetitions / low_confidence are properties of the
+# original raw transcription — they should not change just because the
+# reviewer ran another pass. We load those from the frozen auto-cleanup stats
+# saved on the first run. Only total_removed and comments are updated to
+# reflect what the current reviewer pass actually flagged.
 # ─────────────────────────────────────────────────────────────────────────────
 if (!is.null(opt$reviewed_tsv) && file.exists(opt$reviewed_tsv)) {
 
@@ -93,15 +103,15 @@ if (!is.null(opt$reviewed_tsv) && file.exists(opt$reviewed_tsv)) {
     reviewed <- reviewed %>% mutate(comment = FALSE)
   }
 
-  # Count comment rows as a feature before dropping anything
+  # Count reviewer-flagged comment rows as a feature before dropping anything
   comments_per_prompt <- reviewed %>%
     dplyr::filter(comment) %>%
     group_by(participant_id, task, audio_file, prompt) %>%
     summarise(comment_count = n(), .groups = "drop")
 
   # Drop rows the reviewer flagged
-  n_before <- nrow(reviewed)
-  tx_clean <- reviewed %>% dplyr::filter(!drop)
+  n_before  <- nrow(reviewed)
+  tx_clean  <- reviewed %>% dplyr::filter(!drop)
   n_dropped <- n_before - nrow(tx_clean)
   log_info("  Dropped {n_dropped} rows flagged for removal ({nrow(tx_clean)} remaining)")
 
@@ -113,42 +123,62 @@ if (!is.null(opt$reviewed_tsv) && file.exists(opt$reviewed_tsv)) {
     tx_clean <- tx_clean %>% mutate(response = word)
   }
 
-  # Compute remaining rule violations from the kept rows
-  fillers_to_remove <- config$transcription$filters$remove_fillers
+  # ── Load frozen auto-cleanup stats as baseline ──────────────────────────────
+  # ums, repetitions, and low_confidence are properties of the original raw
+  # transcription. We preserve them from the first auto run so they are
+  # consistent across all review rounds.
+  if (file.exists(auto_stats_path)) {
+    log_info("  Loading frozen auto-cleanup baseline stats from: {auto_stats_path}")
+    auto_stats <- read_rds(auto_stats_path)
+    baseline_removed_stats   <- auto_stats$removed_stats
+    baseline_rule_violations <- auto_stats$rule_violations
+  } else {
+    log_warn("  No auto-cleanup baseline stats found at: {auto_stats_path}")
+    log_warn("  Falling back to re-computing violation counts from reviewed TSV.")
+    log_warn("  These counts may be lower than the true values because automatic")
+    log_warn("  cleanup already removed fillers/repeats in a prior run.")
+    log_warn("  Re-run stage 3 with --force-auto-cleanup to regenerate the baseline.")
+    fillers_to_remove <- config$transcription$filters$remove_fillers
+    ums_fb <- tx_clean %>%
+      dplyr::filter(task %in% c("SENT-REP", "WMEMORY", "WORD-ASSOC")) %>%
+      mutate(is_um = response %in% fillers_to_remove) %>%
+      group_by(participant_id, task, audio_file, prompt) %>%
+      summarise(ums_count = sum(is_um, na.rm = TRUE), .groups = "drop")
+    rep_prompt_fb <- tx_clean %>%
+      dplyr::filter(task == "WORD-ASSOC") %>%
+      mutate(is_rep_prompt = (prompt == response)) %>%
+      group_by(participant_id, task, audio_file, prompt) %>%
+      summarise(rep_prompt = sum(is_rep_prompt, na.rm = TRUE), .groups = "drop")
+    rep_words_fb <- tx_clean %>%
+      dplyr::filter(task == "WORD-ASSOC") %>%
+      group_by(participant_id, task, audio_file, prompt) %>%
+      mutate(is_repeat = duplicated(response)) %>%
+      summarise(rep_words_per_prompt = sum(is_repeat, na.rm = TRUE), .groups = "drop")
+    baseline_removed_stats <- list(
+      ums            = sum(ums_fb$ums_count),
+      repetitions    = sum(rep_prompt_fb$rep_prompt) + sum(rep_words_fb$rep_words_per_prompt),
+      low_confidence = 0,
+      comments       = 0,
+      total_removed  = n_dropped
+    )
+    baseline_rule_violations <- list(
+      ums                       = ums_fb,
+      comments                  = comments_per_prompt,
+      repeated_prompts          = rep_prompt_fb,
+      repeated_words_per_prompt = rep_words_fb
+    )
+  }
 
-  ums_per_prompt <- tx_clean %>%
-    dplyr::filter(task %in% c("SENT-REP", "WMEMORY", "WORD-ASSOC")) %>%
-    mutate(is_um = response %in% fillers_to_remove) %>%
-    group_by(participant_id, task, audio_file, prompt) %>%
-    summarise(ums_count = sum(is_um, na.rm = TRUE), .groups = "drop")
+  # Build final stats: frozen baseline + updated comment / total counts
+  removed_stats               <- baseline_removed_stats
+  removed_stats$comments      <- sum(comments_per_prompt$comment_count)
+  removed_stats$total_removed <- baseline_removed_stats$total_removed + n_dropped
 
-  rep_prompts_per_prompt <- tx_clean %>%
-    dplyr::filter(task == "WORD-ASSOC") %>%
-    mutate(is_rep_prompt = (prompt == response)) %>%
-    group_by(participant_id, task, audio_file, prompt) %>%
-    summarise(rep_prompt = sum(is_rep_prompt, na.rm = TRUE), .groups = "drop")
+  # Rule violations: frozen ums/repeats + current reviewer comments
+  rule_violations          <- baseline_rule_violations
+  rule_violations$comments <- comments_per_prompt
 
-  rep_words_per_prompt <- tx_clean %>%
-    dplyr::filter(task == "WORD-ASSOC") %>%
-    group_by(participant_id, task, audio_file, prompt) %>%
-    mutate(is_repeat = duplicated(response)) %>%
-    summarise(rep_words_per_prompt = sum(is_repeat, na.rm = TRUE), .groups = "drop")
-
-  rule_violations <- list(
-    ums              = ums_per_prompt,
-    comments         = comments_per_prompt,
-    repeated_prompts = rep_prompts_per_prompt,
-    repeated_words_per_prompt = rep_words_per_prompt
-  )
-
-  removed_stats <- list(
-    ums            = sum(ums_per_prompt$ums_count),
-    repetitions    = sum(rep_prompts_per_prompt$rep_prompt) +
-                     sum(rep_words_per_prompt$rep_words_per_prompt),
-    low_confidence = 0,
-    comments       = sum(comments_per_prompt$comment_count),
-    total_removed  = n_dropped
-  )
+  log_info("  Stats — ums: {removed_stats$ums} (baseline), repetitions: {removed_stats$repetitions} (baseline), manual drops this round: {n_dropped}, total removed: {removed_stats$total_removed}")
 
   # Run task-specific cleaners on the kept rows
   cleaned_tasks <- list()
@@ -207,6 +237,7 @@ write_tsv(
   file.path(opt$output, "review_files", paste0(opt$id, "_cleaned_transcription.tsv"))
 )
 
+# Transcription cleaning stats (updated each run, used by stage 4)
 write_rds(
   list(
     removed_stats   = cleanup_results$removed_stats,
@@ -215,6 +246,23 @@ write_rds(
   file.path(opt$output, "features", paste0(opt$id, "_transcription_cleaning_stats.rds")),
   compress = "gz"
 )
+
+# Auto-cleanup baseline stats: written ONLY on the automatic path (first run).
+# These are intentionally frozen so that ums / repetitions / low_confidence
+# counts remain consistent across all subsequent review rounds.
+if (!file.exists(auto_stats_path)) {
+  log_info("  Writing frozen auto-cleanup baseline stats: {auto_stats_path}")
+  write_rds(
+    list(
+      removed_stats   = cleanup_results$removed_stats,
+      rule_violations = cleanup_results$rule_violations
+    ),
+    auto_stats_path,
+    compress = "gz"
+  )
+} else {
+  log_info("  Frozen auto-cleanup baseline already exists — not overwriting.")
+}
 
 write_rds(
   cleanup_results$cleaned_by_task,
