@@ -195,15 +195,6 @@ RUN cd /app && \
         --ignore-requires-python \
         -e /app/pwesuite
 
-# Install PWESuite runtime dependencies that were skipped by --no-deps above.
-# `datasets` is imported at the top level of pwesuite's preprocessor, so
-# its absence causes an ImportError that kills pwe_wrapper.py before any
-# embeddings are produced. Install it (and other missing deps) explicitly.
-RUN /opt/conda/envs/pwesuite_env/bin/pip install \
-        datasets \
-        soundfile \
-        epitran \
-        g2p-en
 
 # Update pwe_wrapper.py to reference the correct path
 ENV PYTHONPATH="/app/pwesuite"
@@ -263,10 +254,6 @@ RUN set -eux; \
         }\" "; \
     fi
 
-# Copy scripts and reference data
-COPY scripts/        /app/scripts/
-COPY config/         /app/config/
-COPY reference_data/ /app/reference_data/
 
 # Create wrapper scripts that activate correct environments
 RUN echo '#!/bin/bash\n\
@@ -277,17 +264,6 @@ exec /opt/conda/bin/conda run --no-capture-output -n pwesuite_env python "$@"' >
 
 RUN echo '#!/bin/bash\n\
 exec /opt/conda/bin/conda run --no-capture-output -n r_pipeline_env python "$@"' > /usr/local/bin/run-pipeline && chmod +x /usr/local/bin/run-pipeline
-
-# Create output directories
-RUN mkdir -p /app/output/logs \
-             /app/output/features \
-             /app/output/transcriptions \
-             /app/output/cropped_audio \
-             /app/output/review_files
-
-# Default to R pipeline environment
-COPY scripts/pipeline.sh /app/pipeline.sh
-RUN chmod +x /app/pipeline.sh
 
 # Install panphon in pwesuite_env (wheel available on all arches).
 RUN /opt/conda/envs/pwesuite_env/bin/pip install panphon
@@ -315,6 +291,33 @@ RUN set -eux; \
     else \
       /opt/conda/envs/pwesuite_env/bin/pip install panphon2; \
     fi
+
+# Copy scripts and reference data
+COPY config/         /app/config/
+COPY reference_data/ /app/reference_data/
+
+# Install PWESuite runtime dependencies that were skipped by --no-deps above.
+# `datasets` is imported at the top level of pwesuite's preprocessor, so
+# its absence causes an ImportError that kills pwe_wrapper.py before any
+# embeddings are produced. Install it (and other missing deps) explicitly.
+RUN /opt/conda/envs/pwesuite_env/bin/pip install \
+        datasets \
+        soundfile \
+        epitran \
+        g2p-en
+
+COPY scripts/        /app/scripts/
+
+# Create output directories
+RUN mkdir -p /app/output/logs \
+             /app/output/features \
+             /app/output/transcriptions \
+             /app/output/cropped_audio \
+             /app/output/review_files
+
+# Default to R pipeline environment
+COPY scripts/pipeline.sh /app/pipeline.sh
+RUN chmod +x /app/pipeline.sh
 
 ENTRYPOINT ["/app/pipeline.sh"]
 CMD ["test_participant", "/app/data/example_audio.wav"]
