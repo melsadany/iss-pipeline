@@ -48,8 +48,9 @@ clean_hi <- function(tx, cfg) {
 clean_word_assoc <- function(tx, cfg) {
   stopifnot(all(c("participant_id","task","audio_file","prompt","trial","response") %in% names(tx)))
   tx <- tx %>% arrange(participant_id, audio_file, prompt, trial, start)
+  # Keep original trial so downstream code can drop it if present
   tx %>%
-    group_by(participant_id, audio_file, prompt) %>%
+    group_by(participant_id, audio_file, prompt, trial) %>%
     summarise(
       n_words     = dplyr::n(),
       first_onset = min(start, na.rm = TRUE),
