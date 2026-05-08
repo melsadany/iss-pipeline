@@ -195,6 +195,16 @@ RUN cd /app && \
         --ignore-requires-python \
         -e /app/pwesuite
 
+# Install PWESuite runtime dependencies that were skipped by --no-deps above.
+# `datasets` is imported at the top level of pwesuite's preprocessor, so
+# its absence causes an ImportError that kills pwe_wrapper.py before any
+# embeddings are produced. Install it (and other missing deps) explicitly.
+RUN /opt/conda/envs/pwesuite_env/bin/pip install \
+        datasets \
+        soundfile \
+        epitran \
+        g2p-en
+
 # Update pwe_wrapper.py to reference the correct path
 ENV PYTHONPATH="/app/pwesuite"
 
