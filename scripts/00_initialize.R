@@ -7,81 +7,87 @@
 initialize_pipeline <- function(config, reference_dir, mode = "auto", where) {
   log_info("Initializing pipeline environment...")
   
-  # Load required packages
   required_packages <- c(
     "tidyverse", "data.table", "yaml", "logger","logging",
-    "tuneR", "seewave", "signal",  # Audio
-    "foreach", "doMC",              # Parallel
-    "lingmatch", "syuzhet", "sentimentr",  # NLP
-    "reticulate",                   # Python integration for PWE
-    "TSP",                          # For divergence calc
-    "igraph",                       # For archetypal analysis
-    "geometry",                     # For convex hull volume
-    "ineq",                         # For Gini index
-    "archetypes",                   # For archetype prediction
+    "tuneR", "seewave", "signal",
+    "foreach", "doMC",
+    "lingmatch", "syuzhet", "sentimentr",
+    "reticulate",
+    "TSP",
+    "igraph",
+    "geometry",
+    "ineq",
+    "archetypes",
     "phonics",
     "stringdist"
   )
   
-  log_debug("Loading required packages...")
+  log_info("  Loading {length(required_packages)} required packages...")
+  n_loaded <- 0L
   for (pkg in required_packages) {
-    if (!suppressWarnings(suppressPackageStartupMessages(
-          require(pkg, character.only = TRUE, quietly = TRUE)
-        ))) {
-      log_warn("Package {pkg} not installed. Installing...")
+    ok <- suppressWarnings(suppressPackageStartupMessages(
+      require(pkg, character.only = TRUE, quietly = TRUE)
+    ))
+    if (!ok) {
+      log_warn("  Package '{pkg}' not installed — installing from CRAN...")
       install.packages(pkg, repos = "https://cloud.r-project.org")
       suppressWarnings(suppressPackageStartupMessages(
         library(pkg, character.only = TRUE)
       ))
     }
+    n_loaded <- n_loaded + 1L
   }
+  log_info("  ✓ {n_loaded}/{length(required_packages)} packages loaded")
   
   # Load utility functions
   log_debug("Loading utility functions...")
   util_dir <- file.path("scripts/utils")
   if (dir.exists(util_dir)) {
-    for (util_file in list.files(util_dir, pattern = "\\.R$", full.names = TRUE)) {
-      source(util_file)
-    }
+    util_files <- list.files(util_dir, pattern = "\\.R$", full.names = TRUE)
+    for (util_file in util_files) source(util_file)
+    if (length(util_files) > 0)
+      log_debug("  ✓ {length(util_files)} utility file(s) sourced from {util_dir}")
   }
   
-  
   # Initialize Python for phonetic embeddings
-  log_debug("Initializing Python environment for PWE...")
-  tryCatch({
-    # Point to r_pipeline_env Python (which can call other envs via wrappers)
+  log_info("  Initializing Python environment (reticulate/PWE)...")
+  py_ok <- tryCatch({
     Sys.setenv(RETICULATE_PYTHON = "/opt/conda/envs/r_pipeline_env/bin/python")
     reticulate::use_python("/opt/conda/envs/r_pipeline_env/bin/python", required = TRUE)
+    TRUE
   }, error = function(e) {
-    log_warn("Could not initialize Python for reticulate.")
+    log_warn("  Could not initialize Python for reticulate: {e$message}")
+    FALSE
   })
-  
+  if (py_ok) log_info("  ✓ Python environment ready")
   
   # Load reference data
-  log_info("Loading reference data...")
+  log_info("  Loading reference data...")
   reference_data <- load_reference_data(reference_dir)
+  log_info("  ✓ Reference data loaded ({length(reference_data)} dataset(s))")
   
   # Load pre-computed embeddings
-  log_info("Loading pre-computed embeddings...")
+  log_info("  Loading pre-computed embeddings...")
   embeddings <- load_precomputed_embeddings(reference_dir)
+  log_info("  ✓ Embeddings loaded — semantic: {nrow(embeddings$semantic)} words, phonetic: {nrow(embeddings$phonetic)} words")
   
   # Load pre-computed archetypes
-  log_info("Loading pre-computed archetypes...")
+  log_info("  Loading pre-computed archetypes...")
   archetype_refs <- load_precomputed_archetypes(reference_dir)
+  log_info("  ✓ Archetypes loaded")
   
   # Set up parallel processing
   n_cores <- min(parallel::detectCores() - 1, 6)
   registerDoMC(cores = n_cores)
-  log_debug("Parallel processing: {n_cores} cores")
+  log_info("  ✓ Parallel processing: {n_cores} core(s) registered")
   
-  # Return initialized environment
   return(list(
-    config = config,
+    config         = config,
     reference_data = reference_data,
-    embeddings = embeddings,
+    embeddings     = embeddings,
     archetype_refs = archetype_refs,
-    mode = mode,
-    n_cores = n_cores
+    mode           = mode,
+    n_cores        = n_cores
   ))
 }
 
@@ -92,14 +98,12 @@ initialize_pipeline <- function(config, reference_dir, mode = "auto", where) {
 load_reference_data <- function(reference_dir) {
   ref_data <- list()
   
-  # Task metadata
   task_meta_file <- file.path(reference_dir, "task_metadata", "ISS_v_1.10_B_task_metadata.csv")
   if (file.exists(task_meta_file)) {
     ref_data$task_metadata <- read_csv(task_meta_file, show_col_types = FALSE)
     log_debug("  ✓ Task metadata loaded: {nrow(ref_data$task_metadata)} tasks")
   }
   
-  # Age of Acquisition
   aoa_file <- file.path(reference_dir, "linguistic", "AoA_51715_words.xlsx")
   if (file.exists(aoa_file)) {
     ref_data$aoa <- readxl::read_xlsx(aoa_file) %>%
@@ -112,7 +116,6 @@ load_reference_data <- function(reference_dir) {
     log_debug("  ✓ AoA data loaded: {nrow(ref_data$aoa)} words")
   }
   
-  # GPT Familiarity
   gpt_fam_file <- file.path(reference_dir, "linguistic", "GPT_familiarity.xlsx")
   if (file.exists(gpt_fam_file)) {
     ref_data$gpt_familiarity <- readxl::read_xlsx(gpt_fam_file) %>%
@@ -123,7 +126,6 @@ load_reference_data <- function(reference_dir) {
     log_debug("  ✓ GPT familiarity loaded: {nrow(ref_data$gpt_familiarity)} words")
   }
   
-  # MRC Psycholinguistic Database
   mrc_file <- file.path(reference_dir, "linguistic", "MRC_database.csv")
   if (file.exists(mrc_file)) {
     ref_data$mrc <- read_csv(mrc_file, show_col_types = FALSE) %>%
@@ -135,7 +137,6 @@ load_reference_data <- function(reference_dir) {
     log_debug("  ✓ MRC data loaded: {nrow(ref_data$mrc)} words")
   }
   
-  # Concreteness ratings
   conc_file <- file.path(reference_dir, "linguistic", "concreteness_ratings.xlsx")
   if (file.exists(conc_file)) {
     ref_data$concreteness <- readxl::read_xlsx(conc_file) %>%
@@ -155,7 +156,6 @@ load_reference_data <- function(reference_dir) {
 load_precomputed_embeddings <- function(reference_dir) {
   embeddings <- list()
   
-  # Semantic embeddings
   sem_file <- file.path(reference_dir, "embeddings", "semantic_common_50k.rds")
   if (file.exists(sem_file)) {
     embeddings$semantic <- readRDS(sem_file)
@@ -165,7 +165,6 @@ load_precomputed_embeddings <- function(reference_dir) {
     embeddings$semantic <- data.frame(text = character(), stringsAsFactors = FALSE)
   }
   
-  # Phonetic embeddings
   pwe_file <- file.path(reference_dir, "embeddings", "phonetic_common_50k.rds")
   if (file.exists(pwe_file)) {
     embeddings$phonetic <- readRDS(pwe_file)
@@ -185,7 +184,6 @@ load_precomputed_embeddings <- function(reference_dir) {
 load_precomputed_archetypes <- function(reference_dir) {
   archetype_refs <- list()
   
-  # Semantic archetypes
   sem_arch_file <- file.path(reference_dir, "archetypes", "semantic_common_50k.rds")
   if (file.exists(sem_arch_file)) {
     archetype_refs$semantic <- readRDS(sem_arch_file)
@@ -199,7 +197,6 @@ load_precomputed_archetypes <- function(reference_dir) {
     stop("Missing semantic archetypes reference file")
   }
   
-  # Phonetic archetypes
   pho_arch_file <- file.path(reference_dir, "archetypes", "phonetic_common_50k.rds")
   if (file.exists(pho_arch_file)) {
     archetype_refs$phonetic <- readRDS(pho_arch_file)

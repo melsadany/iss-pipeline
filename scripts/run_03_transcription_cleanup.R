@@ -14,9 +14,6 @@ for (pkg in required_packages) {
   }
 }
 
-# ---------------------------------------------------------------------------
-# Script-path helper
-# ---------------------------------------------------------------------------
 get_script_path <- function() {
   cmdArgs <- commandArgs(trailingOnly = FALSE)
   needle  <- "--file="
@@ -26,9 +23,6 @@ get_script_path <- function() {
 }
 script_dir <- get_script_path()
 
-# ---------------------------------------------------------------------------
-# CLI arguments
-# ---------------------------------------------------------------------------
 option_list <- list(
   make_option(c("--id"),                 type = "character", default = NULL,
               help = "Participant ID"),
@@ -45,8 +39,6 @@ option_list <- list(
                 "When no review files are found the script falls back to the",
                 "automatic cleanup path."
               )),
-  # Legacy alias kept for backwards-compatibility with older run scripts.
-  # Ignored when --review_dir is supplied.
   make_option(c("--reviewed_tsv"),       type = "character", default = NULL,
               help = "[DEPRECATED] Legacy single-reviewer TSV. Use --review_dir instead."),
   make_option(c("--mode"),               type = "character", default = "auto",
@@ -62,15 +54,9 @@ option_list <- list(
 opt_parser <- OptionParser(option_list = option_list)
 opt        <- parse_args(opt_parser)
 
-# ---------------------------------------------------------------------------
-# Logging
-# ---------------------------------------------------------------------------
 log_threshold(INFO)
 log_appender(appender_console)
 
-# ---------------------------------------------------------------------------
-# Dependencies
-# ---------------------------------------------------------------------------
 source(file.path(script_dir, "00_initialize.R"))
 source(file.path(script_dir, "03_transcription_cleanup.R"))
 
@@ -78,26 +64,33 @@ config <- yaml::read_yaml(opt$config)
 
 log_info("STAGE 3: Transcription Cleanup")
 log_info(strrep("-", 80))
+log_info("  Participant       : {opt$id}")
+log_info("  Transcription file: {opt$transcription_file}")
+log_info("  Mode              : {opt$mode}")
+log_info("  Output dir        : {opt$output}")
+
+# Validate input
+if (!file.exists(opt$transcription_file))
+  stop(sprintf("Transcription file not found: %s", opt$transcription_file), call. = FALSE)
+
+tx_raw <- read_tsv(opt$transcription_file, show_col_types = FALSE)
+log_info("  Input rows        : {nrow(tx_raw)} ({ncol(tx_raw)} columns)")
+task_row_counts <- table(tx_raw$task)
+for (t in names(task_row_counts)) log_info("    - {t}: {task_row_counts[[t]]} rows")
 
 system(paste0("mkdir -p ", file.path(opt$output, "review_files")))
 system(paste0("mkdir -p ", file.path(opt$output, "features")))
 
-# Path to the frozen auto-cleanup baseline (written once; never overwritten)
 auto_stats_path <- file.path(
   opt$output, "features",
   paste0(opt$id, "_auto_cleaning_stats.rds")
 )
 
-# ---------------------------------------------------------------------------
-# Helper: apply drop/comment columns produced by review (single TSV path)
-# ---------------------------------------------------------------------------
 apply_review_tsv <- function(reviewed, config, n_dropped_extra = 0L) {
-
   norm_bool <- function(x) {
     if (is.logical(x)) return(x)
     toupper(trimws(as.character(x))) %in% c("TRUE", "1", "YES")
   }
-
   if (!"drop"    %in% names(reviewed)) reviewed$drop    <- FALSE
   if (!"comment" %in% names(reviewed)) reviewed$comment <- NA_character_
   reviewed <- reviewed %>%
@@ -106,21 +99,16 @@ apply_review_tsv <- function(reviewed, config, n_dropped_extra = 0L) {
       comment = ifelse(toupper(trimws(as.character(comment))) %in%
                          c("FALSE", "NA", ""), NA_character_, as.character(comment))
     )
-
-  # Comment-flagged rows counted as a feature before any dropping
   comments_per_prompt <- reviewed %>%
     dplyr::filter(!is.na(comment)) %>%
     group_by(participant_id, task, audio_file, prompt) %>%
     summarise(comment_count = n(), .groups = "drop")
-
   n_before  <- nrow(reviewed)
   tx_clean  <- reviewed %>% dplyr::filter(!drop)
   n_dropped <- (n_before - nrow(tx_clean)) + n_dropped_extra
   log_info("  Dropped {n_before - nrow(tx_clean)} row(s) flagged for removal ({nrow(tx_clean)} remaining)")
-
   tx_clean <- tx_clean %>% select(-any_of(c("drop", "comment")))
   if (!"response" %in% names(tx_clean)) tx_clean <- tx_clean %>% mutate(response = word)
-
   list(
     tx_clean            = tx_clean,
     comments_per_prompt = comments_per_prompt,
@@ -128,15 +116,12 @@ apply_review_tsv <- function(reviewed, config, n_dropped_extra = 0L) {
   )
 }
 
-# ---------------------------------------------------------------------------
-# Helper: load frozen baseline stats (or build a fallback)
-# ---------------------------------------------------------------------------
 load_or_build_baseline <- function(auto_stats_path, tx_clean,
                                    comments_per_prompt, n_dropped, config) {
   if (file.exists(auto_stats_path)) {
     log_info("  Loading frozen auto-cleanup baseline stats: {auto_stats_path}")
-    auto_stats              <- read_rds(auto_stats_path)
-    baseline_removed_stats  <- auto_stats$removed_stats
+    auto_stats               <- read_rds(auto_stats_path)
+    baseline_removed_stats   <- auto_stats$removed_stats
     baseline_rule_violations <- auto_stats$rule_violations
   } else {
     log_warn("  No auto-cleanup baseline stats found — building fallback from reviewed TSV.")
@@ -170,130 +155,107 @@ load_or_build_baseline <- function(auto_stats_path, tx_clean,
       repeated_words_per_prompt = rep_words_fb
     )
   }
-
-  # Overlay current-round comment / drop counts
   removed_stats               <- baseline_removed_stats
   removed_stats$comments      <- sum(comments_per_prompt$comment_count)
   removed_stats$total_removed <- baseline_removed_stats$total_removed + n_dropped
-
   rule_violations          <- baseline_rule_violations
   rule_violations$comments <- comments_per_prompt
-
   list(removed_stats = removed_stats, rule_violations = rule_violations)
 }
 
-# ---------------------------------------------------------------------------
-# Helper: run task-specific cleaners on a tx_clean data frame
-# ---------------------------------------------------------------------------
 run_task_cleaners <- function(tx_clean, config) {
   cleaned_tasks <- list()
-
   tx_checkbox <- tx_clean %>% dplyr::filter(str_detect(audio_file, "CHECKBOX"))
-  if (nrow(tx_checkbox) > 0) cleaned_tasks$checkbox <- clean_checkbox(tx_checkbox, config)
-
+  if (nrow(tx_checkbox) > 0) {
+    cleaned_tasks$checkbox <- clean_checkbox(tx_checkbox, config)
+    log_info("  CHECKBOX : {nrow(cleaned_tasks$checkbox)} trial(s)")
+  }
   tx_hi <- tx_clean %>% dplyr::filter(str_detect(audio_file, "HI"))
-  if (nrow(tx_hi) > 0) cleaned_tasks$hi <- clean_hi(tx_hi, config)
-
+  if (nrow(tx_hi) > 0) {
+    cleaned_tasks$hi <- clean_hi(tx_hi, config)
+    log_info("  HI       : {nrow(cleaned_tasks$hi)} trial(s)")
+  }
   tx_word_assoc <- tx_clean %>% dplyr::filter(str_detect(audio_file, "WORD-ASSOC"))
-  if (nrow(tx_word_assoc) > 0) cleaned_tasks$word_assoc <- clean_word_assoc(tx_word_assoc, config)
-
+  if (nrow(tx_word_assoc) > 0) {
+    cleaned_tasks$word_assoc <- clean_word_assoc(tx_word_assoc, config)
+    log_info("  WORD-ASSOC: {nrow(cleaned_tasks$word_assoc)} word(s) across {n_distinct(cleaned_tasks$word_assoc$prompt)} prompt(s)")
+  }
   tx_wmemory <- tx_clean %>% dplyr::filter(str_detect(audio_file, "WMEMORY"))
-  if (nrow(tx_wmemory) > 0 && !is.null(cleaned_tasks$word_assoc))
+  if (nrow(tx_wmemory) > 0 && !is.null(cleaned_tasks$word_assoc)) {
     cleaned_tasks$wmemory <- clean_wmemory(tx_wmemory, cleaned_tasks$word_assoc, config)
-
+    log_info("  WMEMORY  : {nrow(cleaned_tasks$wmemory)} recall trial(s)")
+  }
   tx_sent_rep <- tx_clean %>% dplyr::filter(str_detect(audio_file, "SENT-REP"))
-  if (nrow(tx_sent_rep) > 0) cleaned_tasks$sent_rep <- clean_sent_rep(tx_sent_rep, config)
-
+  if (nrow(tx_sent_rep) > 0) {
+    cleaned_tasks$sent_rep <- clean_sent_rep(tx_sent_rep, config)
+    log_info("  SENT-REP : {nrow(cleaned_tasks$sent_rep)} sentence(s)")
+  }
   tx_reading <- tx_clean %>% dplyr::filter(str_detect(audio_file, "READING"))
-  if (nrow(tx_reading) > 0) cleaned_tasks$reading <- clean_reading(tx_reading, config)
-
+  if (nrow(tx_reading) > 0) {
+    cleaned_tasks$reading <- clean_reading(tx_reading, config)
+    log_info("  READING  : {nrow(cleaned_tasks$reading)} word(s)")
+  }
   cleaned_tasks
 }
 
 # ===========================================================================
 # DECISION TREE
-#
-#   1. --review_dir exists AND contains <id>_review_*.tsv files
-#         ├─ multiple raters → compute_consensus() → apply_review_tsv()
-#         └─ single rater   → apply_review_tsv() directly
-#   2. --review_dir is empty or absent AND --reviewed_tsv supplied (legacy)
-#         └─ apply_review_tsv() directly
-#   3. No review at all → automatic cleanup_transcription()
 # ===========================================================================
 
-# Resolve effective review directory (prefer --review_dir over legacy).
-# NOTE: braces around the if/else are required — bare multi-line if/else at
-# the top level of an Rscript causes an 'unexpected else' parse error when
-# the condition is FALSE and the 'if' result falls on a separate line.
 effective_review_dir <- {
   if (!is.null(opt$review_dir) && nchar(opt$review_dir) > 0) {
     opt$review_dir
   } else {
-    file.path(opt$output, "review_files")  # default search location
+    file.path(opt$output, "review_files")
   }
 }
 
-# Glob per-rater files
 all_review_files <- list.files(
   effective_review_dir,
   pattern = paste0("^", opt$id, "_review_[A-Za-z0-9]+_\\d{8}T\\d{4}\\.tsv$"),
   full.names = TRUE
 )
-
-# Remove consensus output from the file list if it somehow ended up there
 all_review_files <- all_review_files[
   !grepl("_consensus", basename(all_review_files))
 ]
 
+stage_start <- proc.time()[[3]]
+
 if (length(all_review_files) > 0) {
 
-  # -------------------------------------------------------------------------
-  # REVIEW PATH (one or more rater files found)
-  # -------------------------------------------------------------------------
+  # REVIEW PATH
   rater_files <- get_latest_per_rater(all_review_files, opt$id)
   n_raters    <- length(rater_files)
-
-  log_info("  Found {n_raters} rater file(s) in {effective_review_dir}:")
+  log_info("  Path          : REVIEW ({n_raters} rater file(s) found)")
   for (nm in names(rater_files)) log_info("    [{nm}] {basename(rater_files[[nm]])}")
 
-  # Load raw stage-2 TSV as the reference (needed by consensus and by
-  # the single-reviewer path for row-key alignment)
   raw_tsv <- read_tsv(opt$transcription_file, show_col_types = FALSE)
 
   if (n_raters > 1) {
-    # ── Multi-reviewer: compute consensus ───────────────────────────────────
-    log_info("  Multiple raters detected — computing consensus.")
+    log_info("  Multiple raters — computing consensus.")
     reviewed <- compute_consensus(raw_tsv, rater_files)
-
-    # Persist the consensus TSV for auditability
     consensus_out <- file.path(
       effective_review_dir,
-      paste0(opt$id, "_consensus_",
-             format(Sys.time(), "%Y%m%dT%H%M"), ".tsv")
+      paste0(opt$id, "_consensus_", format(Sys.time(), "%Y%m%dT%H%M"), ".tsv")
     )
     write_tsv(reviewed, consensus_out)
-    log_info("  Consensus written to: {consensus_out}")
-
+    log_info("  Consensus written: {consensus_out}")
   } else {
-    # ── Single reviewer: use their file directly ────────────────────────────
-    log_info("  Single rater — applying review directly without consensus voting.")
+    log_info("  Single rater — applying review directly.")
     reviewed <- read_tsv(rater_files[[1]], show_col_types = FALSE)
   }
 
-  # Apply drop/comment columns
   applied              <- apply_review_tsv(reviewed, config)
   tx_clean             <- applied$tx_clean
   comments_per_prompt  <- applied$comments_per_prompt
   n_dropped            <- applied$n_dropped
 
-  # Build / overlay stats
-  stats_out  <- load_or_build_baseline(
-    auto_stats_path, tx_clean, comments_per_prompt, n_dropped, config
-  )
+  stats_out       <- load_or_build_baseline(auto_stats_path, tx_clean, comments_per_prompt, n_dropped, config)
   removed_stats   <- stats_out$removed_stats
   rule_violations <- stats_out$rule_violations
 
-  log_info("  Stats — ums: {removed_stats$ums} (baseline), repetitions: {removed_stats$repetitions} (baseline), drops this round: {n_dropped}, total removed: {removed_stats$total_removed}")
+  log_info("  Cleanup stats — fillers: {removed_stats$ums}, repetitions: {removed_stats$repetitions}, drops this round: {n_dropped}, total removed: {removed_stats$total_removed}")
+  log_info("  Valid responses remaining: {nrow(tx_clean)}")
 
   cleaned_tasks <- run_task_cleaners(tx_clean, config)
 
@@ -308,24 +270,24 @@ if (length(all_review_files) > 0) {
 
 } else if (!is.null(opt$reviewed_tsv) && file.exists(opt$reviewed_tsv)) {
 
-  # -------------------------------------------------------------------------
-  # LEGACY PATH: --reviewed_tsv (single-reviewer old-style TSV)
-  # -------------------------------------------------------------------------
-  log_info("  [LEGACY] --reviewed_tsv supplied — no review_dir files found.")
+  # LEGACY PATH
+  log_info("  Path: LEGACY (--reviewed_tsv supplied; no review_dir files found)")
   log_info("  File: {opt$reviewed_tsv}")
-  log_info("  Consider migrating to --review_dir for multi-reviewer support.")
+  log_warn("  Consider migrating to --review_dir for multi-reviewer support.")
 
   reviewed            <- read_tsv(opt$reviewed_tsv, show_col_types = FALSE)
+  log_info("  Legacy TSV rows: {nrow(reviewed)}")
   applied             <- apply_review_tsv(reviewed, config)
   tx_clean            <- applied$tx_clean
   comments_per_prompt <- applied$comments_per_prompt
   n_dropped           <- applied$n_dropped
 
-  stats_out       <- load_or_build_baseline(
-    auto_stats_path, tx_clean, comments_per_prompt, n_dropped, config
-  )
+  stats_out       <- load_or_build_baseline(auto_stats_path, tx_clean, comments_per_prompt, n_dropped, config)
   removed_stats   <- stats_out$removed_stats
   rule_violations <- stats_out$rule_violations
+
+  log_info("  Cleanup stats — fillers: {removed_stats$ums}, repetitions: {removed_stats$repetitions}, drops this round: {n_dropped}, total removed: {removed_stats$total_removed}")
+  log_info("  Valid responses remaining: {nrow(tx_clean)}")
 
   cleaned_tasks <- run_task_cleaners(tx_clean, config)
 
@@ -340,12 +302,11 @@ if (length(all_review_files) > 0) {
 
 } else {
 
-  # -------------------------------------------------------------------------
-  # AUTOMATIC PATH (no review files of any kind)
-  # -------------------------------------------------------------------------
-  log_info("  No review files found — running automatic cleanup.")
+  # AUTOMATIC PATH
+  log_info("  Path: AUTO (no review files found — running automatic cleanup)")
+  log_info("  Mode: {opt$mode}")
 
-  transcription  <- read_tsv(opt$transcription_file, show_col_types = FALSE)
+  transcription   <- tx_raw
   cleanup_results <- cleanup_transcription(
     transcription  = transcription,
     participant_id = opt$id,
@@ -353,32 +314,37 @@ if (length(all_review_files) > 0) {
     config         = config,
     output_dir     = file.path(opt$output, "review_files")
   )
+
+  if (!is.null(cleanup_results$removed_stats)) {
+    rs <- cleanup_results$removed_stats
+    log_info("  Cleanup stats — fillers: {rs$ums}, repetitions: {rs$repetitions}, low-conf: {rs$low_confidence}, comments: {rs$comments}, total removed: {rs$total_removed}")
+    log_info("  Valid responses remaining: {nrow(cleanup_results$clean_tx)}")
+  }
 }
 
+elapsed <- round(proc.time()[[3]] - stage_start, 1)
+
 # ===========================================================================
-# SAVE OUTPUTS (same for all paths)
+# SAVE OUTPUTS
 # ===========================================================================
 
-# Cleaned transcription (the file the Review tab loads; Stage 4 reads this)
-write_tsv(
-  cleanup_results$clean_tx,
-  file.path(opt$output, "review_files",
-            paste0(opt$id, "_cleaned_transcription.tsv"))
-)
+cleaned_tsv_path <- file.path(opt$output, "review_files",
+                               paste0(opt$id, "_cleaned_transcription.tsv"))
+write_tsv(cleanup_results$clean_tx, cleaned_tsv_path)
+log_info("  ✓ Cleaned transcription saved: {cleaned_tsv_path}")
 
-# Transcription cleaning stats (updated each run; consumed by stage 4)
+cleaning_stats_path <- file.path(opt$output, "features",
+                                  paste0(opt$id, "_transcription_cleaning_stats.rds"))
 write_rds(
   list(
     removed_stats   = cleanup_results$removed_stats,
     rule_violations = cleanup_results$rule_violations
   ),
-  file.path(opt$output, "features",
-            paste0(opt$id, "_transcription_cleaning_stats.rds")),
+  cleaning_stats_path,
   compress = "gz"
 )
+log_info("  ✓ Cleaning stats saved  : {cleaning_stats_path}")
 
-# Frozen auto-cleanup baseline: written ONLY on the first automatic run so
-# that ums / repetitions / low_confidence remain stable across review rounds.
 if (!file.exists(auto_stats_path)) {
   log_info("  Writing frozen auto-cleanup baseline: {auto_stats_path}")
   write_rds(
@@ -393,13 +359,9 @@ if (!file.exists(auto_stats_path)) {
   log_info("  Frozen auto-cleanup baseline already exists — not overwriting.")
 }
 
-write_rds(
-  cleanup_results$cleaned_by_task,
-  file.path(opt$output, "features",
-            paste0(opt$id, "_tasks-minimal-features.rds")),
-  compress = "gz"
-)
+task_features_path <- file.path(opt$output, "features",
+                                 paste0(opt$id, "_tasks-minimal-features.rds"))
+write_rds(cleanup_results$cleaned_by_task, task_features_path, compress = "gz")
+log_info("  ✓ Task features saved   : {task_features_path}")
 
-log_info("  ✓ Transcription cleaned")
-log_info("  ✓ {nrow(cleanup_results$clean_tx)} valid responses retained")
-log_info("✓ Stage 3 Complete")
+log_info("✓ Stage 3 Complete [{elapsed}s]")
