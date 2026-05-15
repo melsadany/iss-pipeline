@@ -188,8 +188,7 @@ apply_review_tsv <- function(reviewed, config, n_dropped_extra = 0L) {
   tx_clean  <- reviewed %>% dplyr::filter(!drop)
   n_dropped <- (n_before - nrow(tx_clean)) + n_dropped_extra
   log_info("  Dropped {n_before - nrow(tx_clean)} row(s) flagged for removal ({nrow(tx_clean)} remaining)")
-  # Keep reviewer annotation columns in the saved cleaned transcription TSV
-  # so downstream manual review/export retains drop/comment decisions.
+  # Preserve drop/comment so they survive into the cleaned TSV
   if (!"response" %in% names(tx_clean)) tx_clean <- tx_clean %>% mutate(response = word)
   list(
     tx_clean            = tx_clean,
@@ -232,71 +231,63 @@ load_or_build_baseline <- function(auto_stats_path, tx_clean,
     )
     baseline_rule_violations <- list(
       ums                       = ums_fb,
-      comments                  = comments_per_prompt,
+      comments                  = tibble::tibble(),
       repeated_prompts          = rep_prompt_fb,
       repeated_words_per_prompt = rep_words_fb
     )
   }
-  removed_stats               <- baseline_removed_stats
-  removed_stats$comments      <- sum(comments_per_prompt$comment_count)
-  removed_stats$total_removed <- baseline_removed_stats$total_removed + n_dropped
-  rule_violations          <- baseline_rule_violations
-  rule_violations$comments <- comments_per_prompt
-  list(removed_stats = removed_stats, rule_violations = rule_violations)
+  list(removed_stats = baseline_removed_stats, rule_violations = baseline_rule_violations)
 }
 
 run_task_cleaners <- function(tx_clean, config) {
   cleaned_tasks <- list()
-  tx_checkbox <- tx_clean %>% dplyr::filter(str_detect(audio_file, "CHECKBOX"))
+  tx_checkbox <- tx_clean %>% dplyr::filter(stringr::str_detect(audio_file, "CHECKBOX"))
   if (nrow(tx_checkbox) > 0) {
     cleaned_tasks$checkbox <- clean_checkbox(tx_checkbox, config)
-    log_info("  CHECKBOX : {nrow(cleaned_tasks$checkbox)} trial(s)")
+    log_info("  CHECKBOX: {nrow(cleaned_tasks$checkbox)} trials processed")
   }
-  tx_hi <- tx_clean %>% dplyr::filter(str_detect(audio_file, "HI"))
+  tx_hi <- tx_clean %>% dplyr::filter(stringr::str_detect(audio_file, "HI"))
   if (nrow(tx_hi) > 0) {
     cleaned_tasks$hi <- clean_hi(tx_hi, config)
-    log_info("  HI       : {nrow(cleaned_tasks$hi)} trial(s)")
+    log_info("  HI: {nrow(cleaned_tasks$hi)} trials processed")
   }
-  tx_word_assoc <- tx_clean %>% dplyr::filter(str_detect(audio_file, "WORD-ASSOC"))
+  tx_word_assoc <- tx_clean %>% dplyr::filter(stringr::str_detect(audio_file, "WORD-ASSOC"))
   if (nrow(tx_word_assoc) > 0) {
     cleaned_tasks$word_assoc <- clean_word_assoc(tx_word_assoc, config)
-    log_info("  WORD-ASSOC: {nrow(cleaned_tasks$word_assoc)} word(s) across {n_distinct(cleaned_tasks$word_assoc$prompt)} prompt(s)")
+    log_info("  WORD-ASSOC: {nrow(cleaned_tasks$word_assoc)} words across {dplyr::n_distinct(cleaned_tasks$word_assoc$prompt)} prompts")
   }
-  tx_wmemory <- tx_clean %>% dplyr::filter(str_detect(audio_file, "WMEMORY"))
+  tx_wmemory <- tx_clean %>% dplyr::filter(stringr::str_detect(audio_file, "WMEMORY"))
   if (nrow(tx_wmemory) > 0 && !is.null(cleaned_tasks$word_assoc)) {
     cleaned_tasks$wmemory <- clean_wmemory(tx_wmemory, cleaned_tasks$word_assoc, config)
-    log_info("  WMEMORY  : {nrow(cleaned_tasks$wmemory)} recall trial(s)")
+    log_info("  WMEMORY: {nrow(cleaned_tasks$wmemory)} recall trials")
   }
-  tx_sent_rep <- tx_clean %>% dplyr::filter(str_detect(audio_file, "SENT-REP"))
+  tx_sent_rep <- tx_clean %>% dplyr::filter(stringr::str_detect(audio_file, "SENT-REP"))
   if (nrow(tx_sent_rep) > 0) {
     cleaned_tasks$sent_rep <- clean_sent_rep(tx_sent_rep, config)
-    log_info("  SENT-REP : {nrow(cleaned_tasks$sent_rep)} sentence(s)")
+    log_info("  SENT-REP: {nrow(cleaned_tasks$sent_rep)} sentences")
   }
-  tx_reading <- tx_clean %>% dplyr::filter(str_detect(audio_file, "READING"))
+  tx_reading <- tx_clean %>% dplyr::filter(stringr::str_detect(audio_file, "READING"))
   if (nrow(tx_reading) > 0) {
     cleaned_tasks$reading <- clean_reading(tx_reading, config)
-    log_info("  READING  : {nrow(cleaned_tasks$reading)} word(s)")
+    log_info("  READING: {nrow(cleaned_tasks$reading)} words")
   }
   cleaned_tasks
 }
 
-# ===========================================================================
-# DECISION TREE
-# ===========================================================================
-
-effective_review_dir <- {
-  if (!is.null(opt$review_dir) && nchar(opt$review_dir) > 0) {
-    opt$review_dir
-  } else {
-    file.path(opt$output, "review_files")
-  }
+# ---------------------------------------------------------------------------
+# Resolve the review-file directory
+# ---------------------------------------------------------------------------
+effective_review_dir <- if (!is.null(opt$review_dir) && nzchar(opt$review_dir)) {
+  opt$review_dir
+} else {
+  file.path(opt$output, "review_files")
 }
 
-all_review_files <- list.files(
-  effective_review_dir,
-  pattern = paste0("^", opt$id, "_review_[A-Za-z0-9]+_\\d{8}T\\d{4}\\.tsv$"),
-  full.names = TRUE
-)
+all_review_files <- character(0)
+if (dir.exists(effective_review_dir)) {
+  pattern          <- paste0("^", opt$id, "_review_[A-Za-z0-9]+_\\d{8}T\\d{4}\\.tsv$")
+  all_review_files <- list.files(effective_review_dir, pattern = pattern, full.names = TRUE)
+}
 all_review_files <- all_review_files[
   !grepl("_consensus", basename(all_review_files))
 ]
@@ -407,6 +398,22 @@ if (length(all_review_files) > 0) {
 elapsed <- round(proc.time()[[3]] - stage_start, 1)
 
 # ===========================================================================
+# NORMALISE SCHEMA — ensure review, legacy, and auto paths write identical columns
+# ===========================================================================
+
+CANONICAL_COLS <- c(
+  "participant_id", "task", "audio_file", "prompt", "trial",
+  "type", "subtype", "start", "end", "response", "confidence",
+  "drop", "comment"
+)
+ctx <- cleanup_results$clean_tx
+for (.col in CANONICAL_COLS) {
+  if (!.col %in% names(ctx)) ctx[[.col]] <- NA
+}
+extra_cols <- setdiff(names(ctx), CANONICAL_COLS)
+cleanup_results$clean_tx <- ctx[, c(CANONICAL_COLS, extra_cols), drop = FALSE]
+
+# ===========================================================================
 # SAVE OUTPUTS
 # ===========================================================================
 
@@ -425,25 +432,12 @@ write_rds(
   cleaning_stats_path,
   compress = "gz"
 )
-log_info("  ✓ Cleaning stats saved  : {cleaning_stats_path}")
-
-if (!file.exists(auto_stats_path)) {
-  log_info("  Writing frozen auto-cleanup baseline: {auto_stats_path}")
-  write_rds(
-    list(
-      removed_stats   = cleanup_results$removed_stats,
-      rule_violations = cleanup_results$rule_violations
-    ),
-    auto_stats_path,
-    compress = "gz"
-  )
-} else {
-  log_info("  Frozen auto-cleanup baseline already exists — not overwriting.")
-}
+log_info("  ✓ Cleaning stats saved: {cleaning_stats_path}")
 
 task_features_path <- file.path(opt$output, "features",
-                                 paste0(opt$id, "_tasks-minimal-features.rds"))
+                                 paste0(opt$id, "_cleaned_tasks.rds"))
 write_rds(cleanup_results$cleaned_by_task, task_features_path, compress = "gz")
-log_info("  ✓ Task features saved   : {task_features_path}")
+log_info("  ✓ Task-level features saved: {task_features_path}")
 
-log_info("✓ Stage 3 Complete [{elapsed}s]")
+log_info(strrep("-", 80))
+log_info("STAGE 3 complete in {elapsed}s")
