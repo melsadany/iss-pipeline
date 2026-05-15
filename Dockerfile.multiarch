@@ -292,10 +292,6 @@ RUN set -eux; \
       /opt/conda/envs/pwesuite_env/bin/pip install panphon2; \
     fi
 
-# Copy scripts and reference data
-COPY config/         /app/config/
-COPY reference_data/ /app/reference_data/
-
 # Install PWESuite runtime dependencies that were skipped by --no-deps above.
 # `datasets` is imported at the top level of pwesuite's preprocessor, so
 # its absence causes an ImportError that kills pwe_wrapper.py before any
@@ -306,6 +302,9 @@ RUN /opt/conda/envs/pwesuite_env/bin/pip install \
         epitran \
         g2p-en
 
+# Copy scripts and reference data
+COPY reference_data/ /app/reference_data/
+COPY config/         /app/config/
 COPY scripts/        /app/scripts/
 
 # Create output directories
