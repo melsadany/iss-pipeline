@@ -11,8 +11,11 @@ set -euo pipefail
 #   --stage {1|2|3|4|all}   Which stage(s) to run (default: all)
 #   --whisper-model <name>  Override whisper model in config
 #                           (e.g. small, medium, large-v3)
+#   --review-dir <path>     Directory of per-rater review TSV files to pass
+#                           to stage 3 (multi-reviewer support). When omitted
+#                           stage 3 looks in the default review_files/ folder.
 #   --force-auto-cleanup    Force stage 3 to re-run automatic cleanup
-#                           even if a reviewed TSV already exists
+#                           even if review files already exist
 #
 # Stage map:
 #   1 = Audio Preprocessing (R)
@@ -30,6 +33,7 @@ REFERENCE_DIR="/app/reference_data"
 # Defaults
 STAGE="all"
 WHISPER_MODEL_OVERRIDE=""
+REVIEW_DIR_OVERRIDE=""
 FORCE_AUTO_CLEANUP=0
 
 # Parse extra options (starting from arg 4)
@@ -42,6 +46,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --whisper-model)
       WHISPER_MODEL_OVERRIDE="$2"
+      shift 2
+      ;;
+    --review-dir)
+      REVIEW_DIR_OVERRIDE="$2"
       shift 2
       ;;
     --force-auto-cleanup)
@@ -61,6 +69,9 @@ echo "  Audio file  : $AUDIO_FILE"
 echo "  Stage       : $STAGE"
 if [[ -n "$WHISPER_MODEL_OVERRIDE" ]]; then
   echo "  Whisper     : $WHISPER_MODEL_OVERRIDE (override)"
+fi
+if [[ -n "$REVIEW_DIR_OVERRIDE" ]]; then
+  echo "  Review dir  : $REVIEW_DIR_OVERRIDE"
 fi
 echo "=========================================="
 
@@ -105,18 +116,26 @@ run_stage_2() {
 run_stage_3() {
   echo "[Stage 3] Transcription Cleanup..."
 
-  REVIEWED_TSV="$OUTPUT_DIR/review_files/${PARTICIPANT_ID}_cleaned_transcription.tsv"
-  REVIEWED_ARG=""
+  REVIEW_DIR_ARG=""
 
-  if [[ "$FORCE_AUTO_CLEANUP" -eq 0 ]] && [[ -f "$REVIEWED_TSV" ]]; then
-    echo "  [Stage 3] Reviewed TSV found — using manual review edits."
-    echo "            ($REVIEWED_TSV)"
-    REVIEWED_ARG="--reviewed_tsv $REVIEWED_TSV"
+  if [[ "$FORCE_AUTO_CLEANUP" -eq 1 ]]; then
+    # Explicit override: ignore all review files, run automatic cleanup
+    echo "  [Stage 3] --force-auto-cleanup set — running automatic cleanup from scratch."
+  elif [[ -n "$REVIEW_DIR_OVERRIDE" ]]; then
+    # Caller supplied an explicit review directory (e.g. from desktop app staged dir)
+    echo "  [Stage 3] Using supplied review directory: $REVIEW_DIR_OVERRIDE"
+    REVIEW_DIR_ARG="--review_dir $REVIEW_DIR_OVERRIDE"
   else
-    if [[ "$FORCE_AUTO_CLEANUP" -eq 1 ]]; then
-      echo "  [Stage 3] --force-auto-cleanup set — running automatic cleanup from scratch."
+    # Default: let run_03 look in the standard review_files/ output folder
+    DEFAULT_REVIEW_DIR="$OUTPUT_DIR/review_files"
+    REVIEW_FILES_COUNT=$(find "$DEFAULT_REVIEW_DIR" -maxdepth 1 \
+      -name "${PARTICIPANT_ID}_review_*.tsv" \
+      ! -name "*_consensus*" 2>/dev/null | wc -l)
+    if [[ "$REVIEW_FILES_COUNT" -gt 0 ]]; then
+      echo "  [Stage 3] Found $REVIEW_FILES_COUNT review file(s) in $DEFAULT_REVIEW_DIR — using reviewer consensus."
+      REVIEW_DIR_ARG="--review_dir $DEFAULT_REVIEW_DIR"
     else
-      echo "  [Stage 3] No reviewed TSV found — running automatic cleanup."
+      echo "  [Stage 3] No review files found — running automatic cleanup."
     fi
   fi
 
@@ -128,7 +147,7 @@ run_stage_3() {
       --config "$CONFIG" \
       --reference "$REFERENCE_DIR" \
       --output    "$OUTPUT_DIR" \
-      $REVIEWED_ARG
+      $REVIEW_DIR_ARG
   echo "[Stage 3] Done."
 }
 

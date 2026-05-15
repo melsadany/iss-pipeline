@@ -111,6 +111,18 @@ cleanup_transcription <- function(transcription, participant_id, config, mode = 
     total_removed = 0
   )
   
+  # ---------------------------------------------------------------------------
+  # FIX: Coalesce columns that stage 2 may not produce when they are absent
+  # from the audio filenames (type, subtype, trial, response). Without this
+  # the select() call below crashes with "object not found".
+  # ---------------------------------------------------------------------------
+  if (!"type"     %in% names(transcription)) transcription$type     <- NA_character_
+  if (!"subtype"  %in% names(transcription)) transcription$subtype  <- NA_character_
+  if (!"trial"    %in% names(transcription)) transcription$trial    <- NA_integer_
+  if (!"response" %in% names(transcription)) transcription$response <- NA_character_
+  if (!"task"     %in% names(transcription)) transcription$task     <- NA_character_
+  if (!"prompt"   %in% names(transcription)) transcription$prompt   <- NA_character_
+
   tx <- transcription %>%
     mutate(
       word = tolower(word),

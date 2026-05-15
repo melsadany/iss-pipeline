@@ -434,8 +434,10 @@ write_rds(
 )
 log_info("  ✓ Cleaning stats saved: {cleaning_stats_path}")
 
+# FIX: was _cleaned_tasks.rds — renamed to _tasks-minimal-features.rds
+# to match the filename run_04_feature_extraction.R expects.
 task_features_path <- file.path(opt$output, "features",
-                                 paste0(opt$id, "_cleaned_tasks.rds"))
+                                 paste0(opt$id, "_tasks-minimal-features.rds"))
 write_rds(cleanup_results$cleaned_by_task, task_features_path, compress = "gz")
 log_info("  ✓ Task-level features saved: {task_features_path}")
 
