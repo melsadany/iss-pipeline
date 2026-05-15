@@ -92,50 +92,86 @@ get_latest_per_rater <- function(files, id) {
   out
 }
 
-# Compute a simple consensus file given the raw transcription and a set of
-# per-rater TSV review files that share the same columns as the "raw" export
-# plus reviewer-specific columns (e.g., drop/comment). For now we use the
-# most common decision per row across raters when possible, otherwise fall
-# back to the latest rater for ties.
+# Compute a consensus data frame aligned to raw_tsv.
+#
+# Reviewer TSVs may have FEWER rows than raw_tsv when a reviewer deleted rows
+# outright (rather than flagging drop = TRUE). We therefore join reviewer
+# decisions back onto raw_tsv by key (audio_file + start) instead of assuming
+# positional alignment. Rows absent from a reviewer file receive NA drop
+# (treated as keep) and NA comment.
+#
+# Consensus rules:
+#   drop    — majority vote (>50 % TRUE => TRUE); ties => FALSE (keep)
+#   comment — latest non-NA, non-empty comment across raters
 compute_consensus <- function(raw_tsv, rater_files) {
   if (!length(rater_files)) return(raw_tsv)
 
-  # read all rater files
-  rater_dfs <- lapply(rater_files, readr::read_tsv, show_col_types = FALSE)
+  n_raw <- nrow(raw_tsv)
 
-  # assume they all have the same number/order of rows as raw_tsv
-  # and at least the columns: participant_id, task, audio_file, prompt, word
-  # plus optional drop/comment columns.
-  base <- raw_tsv
+  # Build per-rater drop/comment vectors aligned to raw_tsv rows via key join.
+  # Key: audio_file + start (both present in every stage-2 TSV).
+  # If a rater file is missing these columns we fall back to positional fill.
+  drop_mat    <- matrix(NA_character_, nrow = n_raw, ncol = length(rater_files))
+  comment_mat <- matrix(NA_character_, nrow = n_raw, ncol = length(rater_files))
+  colnames(drop_mat)    <- names(rater_files)
+  colnames(comment_mat) <- names(rater_files)
 
-  # Collect drop/comment decisions if present
-  drop_mat    <- list()
-  comment_mat <- list()
-  for (nm in names(rater_dfs)) {
-    df <- rater_dfs[[nm]]
-    if ("drop" %in% names(df))    drop_mat[[nm]]    <- df$drop    else drop_mat[[nm]]    <- rep(NA, nrow(df))
-    if ("comment" %in% names(df)) comment_mat[[nm]] <- df$comment else comment_mat[[nm]] <- rep(NA, nrow(df))
+  key_cols <- c("audio_file", "start")
+
+  for (i in seq_along(rater_files)) {
+    nm  <- names(rater_files)[i]
+    df  <- tryCatch(
+      readr::read_tsv(rater_files[[i]], show_col_types = FALSE),
+      error = function(e) {
+        log_warn("  Could not read rater file [{nm}]: {conditionMessage(e)}")
+        NULL
+      }
+    )
+    if (is.null(df)) next
+
+    has_keys <- all(key_cols %in% names(df)) && all(key_cols %in% names(raw_tsv))
+
+    if (has_keys) {
+      # Join by (audio_file, start) — safe when row counts differ
+      raw_keys  <- paste(raw_tsv$audio_file, raw_tsv$start, sep = "\x00")
+      rat_keys  <- paste(df$audio_file,      df$start,      sep = "\x00")
+      idx       <- match(raw_keys, rat_keys)   # NA where rater row is missing
+
+      if ("drop" %in% names(df)) {
+        drop_vals            <- as.character(df$drop)
+        drop_mat[, i]        <- ifelse(is.na(idx), NA_character_, drop_vals[idx])
+      }
+      if ("comment" %in% names(df)) {
+        comment_vals         <- as.character(df$comment)
+        comment_mat[, i]     <- ifelse(is.na(idx), NA_character_, comment_vals[idx])
+      }
+    } else {
+      # Fallback: positional fill up to min(nrow(df), n_raw)
+      log_warn("  Rater [{nm}]: key columns missing — using positional alignment (row counts may differ).")
+      n_use <- min(nrow(df), n_raw)
+      if ("drop"    %in% names(df)) drop_mat[seq_len(n_use), i]    <- as.character(df$drop[seq_len(n_use)])
+      if ("comment" %in% names(df)) comment_mat[seq_len(n_use), i] <- as.character(df$comment[seq_len(n_use)])
+    }
   }
 
-  drop_mat    <- as.data.frame(drop_mat, stringsAsFactors = FALSE)
-  comment_mat <- as.data.frame(comment_mat, stringsAsFactors = FALSE)
-
-  # Majority vote for drop, latest non-NA comment
-  majority_drop <- apply(drop_mat, 1, function(x) {
-    x <- toupper(trimws(as.character(x)))
+  # Majority vote for drop (TRUE wins if > 50 % of non-NA votes are TRUE)
+  majority_drop <- vapply(seq_len(n_raw), function(r) {
+    x <- toupper(trimws(drop_mat[r, ]))
+    x <- x[!is.na(x) & x != "NA" & nzchar(x)]
     x <- x[x %in% c("TRUE", "FALSE", "1", "0", "YES", "NO")]
     if (!length(x)) return(NA_character_)
-    # treat TRUE/1/YES as TRUE, others as FALSE
     bool <- x %in% c("TRUE", "1", "YES")
     if (sum(bool) > length(bool) / 2) "TRUE" else "FALSE"
-  })
+  }, character(1))
 
-  latest_comment <- apply(comment_mat, 1, function(x) {
-    x <- as.character(x)
-    x <- x[!is.na(x) & nzchar(trimws(x))]
+  # Latest non-NA, non-empty comment
+  latest_comment <- vapply(seq_len(n_raw), function(r) {
+    x <- comment_mat[r, ]
+    x <- x[!is.na(x) & nzchar(trimws(x)) & toupper(trimws(x)) != "NA"]
     if (!length(x)) NA_character_ else tail(x, 1)
-  })
+  }, character(1))
 
+  base         <- raw_tsv
   base$drop    <- majority_drop
   base$comment <- latest_comment
   base
@@ -316,6 +352,14 @@ if (length(all_review_files) > 0) {
   } else {
     log_info("  Single rater — applying review directly.")
     reviewed <- read_tsv(rater_files[[1]], show_col_types = FALSE)
+    # Single-rater file may also have fewer rows than raw_tsv if the reviewer
+    # deleted rows outright. Re-align to raw_tsv so downstream steps see all rows.
+    if (nrow(reviewed) != nrow(raw_tsv) &&
+        all(c("audio_file", "start") %in% names(reviewed)) &&
+        all(c("audio_file", "start") %in% names(raw_tsv))) {
+      log_warn("  Single-rater TSV has {nrow(reviewed)} rows vs {nrow(raw_tsv)} in raw — re-aligning by key.")
+      reviewed <- compute_consensus(raw_tsv, rater_files)
+    }
   }
 
   applied              <- apply_review_tsv(reviewed, config)
