@@ -204,9 +204,17 @@ auto_stats_path <- file.path(
 )
 
 apply_review_tsv <- function(reviewed, config, n_dropped_extra = 0L) {
+  # norm_bool: robustly coerce any representation of TRUE/FALSE to logical.
+  # Handles: actual logical, string "TRUE"/"FALSE", "1"/"0", "YES"/"NO", NA.
   norm_bool <- function(x) {
-    if (is.logical(x)) return(x)
-    toupper(trimws(as.character(x))) %in% c("TRUE", "1", "YES")
+    if (is.logical(x)) {
+      # Replace NA logical with FALSE (absent drop flag = keep row)
+      return(ifelse(is.na(x), FALSE, x))
+    }
+    s <- toupper(trimws(as.character(x)))
+    # Treat NA, empty, or literal "NA" string as FALSE (keep)
+    s[is.na(s) | s == "" | s == "NA"] <- "FALSE"
+    s %in% c("TRUE", "1", "YES")
   }
   if (!"drop"    %in% names(reviewed)) reviewed$drop    <- FALSE
   if (!"comment" %in% names(reviewed)) reviewed$comment <- NA_character_
@@ -216,6 +224,19 @@ apply_review_tsv <- function(reviewed, config, n_dropped_extra = 0L) {
       comment = ifelse(toupper(trimws(as.character(comment))) %in%
                          c("FALSE", "NA", ""), NA_character_, as.character(comment))
     )
+
+  # Warn if an unusually high fraction of rows are flagged for dropping.
+  # This most often indicates that the desktop app wrote drop as a string
+  # ("TRUE") rather than a logical, and the coercion silently treated every
+  # row as drop=TRUE in an earlier code version.
+  pct_drop <- mean(reviewed$drop, na.rm = TRUE)
+  if (pct_drop > 0.8) {
+    log_warn(
+      "  WARNING: {round(pct_drop * 100, 1)}% of rows are flagged drop=TRUE.",
+      " Check review file encoding — may indicate string/logical coercion issue."
+    )
+  }
+
   comments_per_prompt <- reviewed %>%
     dplyr::filter(!is.na(comment)) %>%
     group_by(participant_id, task, audio_file, prompt) %>%
@@ -224,8 +245,15 @@ apply_review_tsv <- function(reviewed, config, n_dropped_extra = 0L) {
   tx_clean  <- reviewed %>% dplyr::filter(!drop)
   n_dropped <- (n_before - nrow(tx_clean)) + n_dropped_extra
   log_info("  Dropped {n_before - nrow(tx_clean)} row(s) flagged for removal ({nrow(tx_clean)} remaining)")
-  # Preserve drop/comment so they survive into the cleaned TSV
-  if (!"response" %in% names(tx_clean)) tx_clean <- tx_clean %>% mutate(response = word)
+  # Ensure 'response' column is populated. Review-path TSVs from the desktop
+  # app use column name 'response'; auto-cleanup TSVs use 'word'. Copy word
+  # -> response when response is absent or entirely NA so stage 4 always finds
+  # a populated 'response' column regardless of which path produced the TSV.
+  if (!"response" %in% names(tx_clean) || all(is.na(tx_clean[["response"]]))) {
+    if ("word" %in% names(tx_clean)) {
+      tx_clean <- tx_clean %>% mutate(response = word)
+    }
+  }
   list(
     tx_clean            = tx_clean,
     comments_per_prompt = comments_per_prompt,
@@ -451,6 +479,17 @@ CANONICAL_COLS <- c(
   "drop", "comment"
 )
 ctx <- cleanup_results$clean_tx
+
+# FIX: The auto-cleanup path names the transcribed token column 'word', not
+# 'response'. Stage 4 always expects 'response'. Copy word -> response before
+# the canonical column loop adds a blank NA column in its place.
+if (!"response" %in% names(ctx) || all(is.na(ctx[["response"]]))) {
+  if ("word" %in% names(ctx)) {
+    log_info("  Populating 'response' from 'word' column (auto-cleanup path).")
+    ctx[["response"]] <- ctx[["word"]]
+  }
+}
+
 for (.col in CANONICAL_COLS) {
   if (!.col %in% names(ctx)) ctx[[.col]] <- NA
 }
@@ -464,7 +503,18 @@ cleanup_results$clean_tx <- ctx[, c(CANONICAL_COLS, extra_cols), drop = FALSE]
 cleaned_tsv_path <- file.path(opt$output, "review_files",
                                paste0(opt$id, "_cleaned_transcription.tsv"))
 write_tsv(cleanup_results$clean_tx, cleaned_tsv_path)
-log_info("  ✓ Cleaned transcription saved: {cleaned_tsv_path}")
+
+# Abort early with a useful message if the cleaned TSV is empty. An empty
+# cleaned transcription will crash stage 4 with unhelpful errors.
+n_clean <- nrow(cleanup_results$clean_tx)
+if (n_clean == 0) {
+  log_error("  ✗ Cleaned transcription has 0 rows — aborting to prevent downstream failures.")
+  log_error("    Raw input had {nrow(tx_raw)} rows.")
+  log_error("    Review path used: {length(all_review_files)} file(s) found in review dir.")
+  log_error("    If using reviewer files, check that the drop column is not all TRUE.")
+  quit(status = 1)
+}
+log_info("  ✓ Cleaned transcription saved ({n_clean} rows): {cleaned_tsv_path}")
 
 cleaning_stats_path <- file.path(opt$output, "features",
                                   paste0(opt$id, "_transcription_cleaning_stats.rds"))
