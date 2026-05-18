@@ -13,7 +13,7 @@ set -euo pipefail
 #                           (e.g. small, medium, large-v3)
 #   --review-dir <path>     Directory of per-rater review TSV files to pass
 #                           to stage 3 (multi-reviewer support). When omitted
-#                           stage 3 looks in the default review_files/ folder.
+#                           stage 3 checks review_files/ then review_files_staged/.
 #   --force-auto-cleanup    Force stage 3 to re-run automatic cleanup
 #                           even if review files already exist
 #
@@ -22,6 +22,11 @@ set -euo pipefail
 #   2 = Transcription       (WhisperX / Python)
 #   3 = Transcription Cleanup (R)
 #   4 = Feature Extraction  (R + Python wrappers)
+#
+# Review file directories (checked in order for stage 3):
+#   1. --review-dir <path>        explicit override (highest priority)
+#   2. $OUTPUT_DIR/review_files/  default location where stage 3 writes files
+#   3. $OUTPUT_DIR/review_files_staged/  staging area populated by desktop app
 # ============================================================
 
 PARTICIPANT_ID=${1:-"TEST0001"}
@@ -121,21 +126,37 @@ run_stage_3() {
   if [[ "$FORCE_AUTO_CLEANUP" -eq 1 ]]; then
     # Explicit override: ignore all review files, run automatic cleanup
     echo "  [Stage 3] --force-auto-cleanup set — running automatic cleanup from scratch."
+
   elif [[ -n "$REVIEW_DIR_OVERRIDE" ]]; then
     # Caller supplied an explicit review directory (e.g. from desktop app staged dir)
     echo "  [Stage 3] Using supplied review directory: $REVIEW_DIR_OVERRIDE"
     REVIEW_DIR_ARG="--review_dir $REVIEW_DIR_OVERRIDE"
+
   else
-    # Default: let run_03 look in the standard review_files/ output folder
+    # Auto-detect: check review_files/ first, then review_files_staged/ as fallback.
     DEFAULT_REVIEW_DIR="$OUTPUT_DIR/review_files"
+    STAGED_REVIEW_DIR="$OUTPUT_DIR/review_files_staged"
+
     REVIEW_FILES_COUNT=$(find "$DEFAULT_REVIEW_DIR" -maxdepth 1 \
       -name "${PARTICIPANT_ID}_review_*.tsv" \
       ! -name "*_consensus*" 2>/dev/null | wc -l)
+
     if [[ "$REVIEW_FILES_COUNT" -gt 0 ]]; then
-      echo "  [Stage 3] Found $REVIEW_FILES_COUNT review file(s) in $DEFAULT_REVIEW_DIR — using reviewer consensus."
+      echo "  [Stage 3] Found $REVIEW_FILES_COUNT review file(s) in review_files/ — using reviewer consensus."
       REVIEW_DIR_ARG="--review_dir $DEFAULT_REVIEW_DIR"
+
     else
-      echo "  [Stage 3] No review files found — running automatic cleanup."
+      # Fallback: check review_files_staged/
+      STAGED_FILES_COUNT=$(find "$STAGED_REVIEW_DIR" -maxdepth 1 \
+        -name "${PARTICIPANT_ID}_review_*.tsv" \
+        ! -name "*_consensus*" 2>/dev/null | wc -l)
+
+      if [[ "$STAGED_FILES_COUNT" -gt 0 ]]; then
+        echo "  [Stage 3] Found $STAGED_FILES_COUNT review file(s) in review_files_staged/ — using staged reviewer files."
+        REVIEW_DIR_ARG="--review_dir $STAGED_REVIEW_DIR"
+      else
+        echo "  [Stage 3] No review files found in review_files/ or review_files_staged/ — running automatic cleanup."
+      fi
     fi
   fi
 

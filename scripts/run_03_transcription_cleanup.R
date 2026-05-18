@@ -61,6 +61,20 @@ source(file.path(script_dir, "00_initialize.R"))
 source(file.path(script_dir, "03_transcription_cleanup.R"))
 
 # ---------------------------------------------------------------------------
+# Helper: normalize word <-> response on any freshly read TSV so all
+# downstream code always has both columns available.
+# ---------------------------------------------------------------------------
+norm_word_response <- function(df) {
+  if (!"word" %in% names(df) && "response" %in% names(df)) {
+    df$word <- df$response
+  }
+  if (!"response" %in% names(df) && "word" %in% names(df)) {
+    df$response <- df$word
+  }
+  df
+}
+
+# ---------------------------------------------------------------------------
 # Helper functions for multi-rater support
 # ---------------------------------------------------------------------------
 
@@ -120,13 +134,13 @@ compute_consensus <- function(raw_tsv, rater_files) {
 
   for (i in seq_along(rater_files)) {
     nm  <- names(rater_files)[i]
-    df  <- tryCatch(
-      readr::read_tsv(rater_files[[i]], show_col_types = FALSE),
-      error = function(e) {
-        log_warn("  Could not read rater file [{nm}]: {conditionMessage(e)}")
-        NULL
-      }
-    )
+    df  <- tryCatch({
+      d <- readr::read_tsv(rater_files[[i]], show_col_types = FALSE)
+      norm_word_response(d)
+    }, error = function(e) {
+      log_warn("  Could not read rater file [{nm}]: {conditionMessage(e)}")
+      NULL
+    })
     if (is.null(df)) next
 
     has_keys <- all(key_cols %in% names(df)) && all(key_cols %in% names(raw_tsv))
@@ -190,7 +204,9 @@ log_info("  Output dir        : {opt$output}")
 if (!file.exists(opt$transcription_file))
   stop(sprintf("Transcription file not found: %s", opt$transcription_file), call. = FALSE)
 
-tx_raw <- read_tsv(opt$transcription_file, show_col_types = FALSE)
+tx_raw <- norm_word_response(
+  read_tsv(opt$transcription_file, show_col_types = FALSE)
+)
 log_info("  Input rows        : {nrow(tx_raw)} ({ncol(tx_raw)} columns)")
 task_row_counts <- table(tx_raw$task)
 for (t in names(task_row_counts)) log_info("    - {t}: {task_row_counts[[t]]} rows")
@@ -366,7 +382,7 @@ if (length(all_review_files) > 0) {
   log_info("  Path          : REVIEW ({n_raters} rater file(s) found)")
   for (nm in names(rater_files)) log_info("    [{nm}] {basename(rater_files[[nm]])}")
 
-  raw_tsv <- read_tsv(opt$transcription_file, show_col_types = FALSE)
+  raw_tsv <- tx_raw   # already normalized above
 
   if (n_raters > 1) {
     log_info("  Multiple raters — computing consensus.")
@@ -379,7 +395,9 @@ if (length(all_review_files) > 0) {
     log_info("  Consensus written: {consensus_out}")
   } else {
     log_info("  Single rater — applying review directly.")
-    reviewed <- read_tsv(rater_files[[1]], show_col_types = FALSE)
+    reviewed <- norm_word_response(
+      read_tsv(rater_files[[1]], show_col_types = FALSE)
+    )
     # Single-rater file may also have fewer rows than raw_tsv if the reviewer
     # deleted rows outright. Re-align to raw_tsv so downstream steps see all rows.
     if (nrow(reviewed) != nrow(raw_tsv) &&
@@ -420,7 +438,9 @@ if (length(all_review_files) > 0) {
   log_info("  File: {opt$reviewed_tsv}")
   log_warn("  Consider migrating to --review_dir for multi-reviewer support.")
 
-  reviewed            <- read_tsv(opt$reviewed_tsv, show_col_types = FALSE)
+  reviewed            <- norm_word_response(
+    read_tsv(opt$reviewed_tsv, show_col_types = FALSE)
+  )
   log_info("  Legacy TSV rows: {nrow(reviewed)}")
   applied             <- apply_review_tsv(reviewed, config)
   tx_clean            <- applied$tx_clean

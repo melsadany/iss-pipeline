@@ -17,7 +17,8 @@ suppressPackageStartupMessages({
 # ---------------------------------------------------------------------------
 
 clean_checkbox <- function(tx, cfg) {
-  # Ensure required columns
+  # Ensure required columns — accept either 'word' or 'response'
+  if (!"response" %in% names(tx) && "word" %in% names(tx)) tx$response <- tx$word
   stopifnot(all(c("participant_id","task","audio_file","prompt","trial","response") %in% names(tx)))
   tx <- tx %>% arrange(participant_id, audio_file, trial)
   tx %>%
@@ -31,6 +32,7 @@ clean_checkbox <- function(tx, cfg) {
 }
 
 clean_hi <- function(tx, cfg) {
+  if (!"response" %in% names(tx) && "word" %in% names(tx)) tx$response <- tx$word
   stopifnot(all(c("participant_id","task","audio_file","prompt","trial","response") %in% names(tx)))
   tx <- tx %>% arrange(participant_id, audio_file, trial, start)
   tx %>%
@@ -46,9 +48,9 @@ clean_hi <- function(tx, cfg) {
 }
 
 clean_word_assoc <- function(tx, cfg) {
+  if (!"response" %in% names(tx) && "word" %in% names(tx)) tx$response <- tx$word
   stopifnot(all(c("participant_id","task","audio_file","prompt","trial","response") %in% names(tx)))
   tx <- tx %>% arrange(participant_id, audio_file, prompt, trial, start)
-  # Keep original trial so downstream code can drop it if present
   tx %>%
     group_by(participant_id, audio_file, prompt, trial) %>%
     summarise(
@@ -60,6 +62,7 @@ clean_word_assoc <- function(tx, cfg) {
 }
 
 clean_wmemory <- function(tx, word_assoc_clean, cfg) {
+  if (!"response" %in% names(tx) && "word" %in% names(tx)) tx$response <- tx$word
   stopifnot(all(c("participant_id","task","audio_file","prompt","trial","response") %in% names(tx)))
   tx <- tx %>% arrange(participant_id, audio_file, trial)
   tx %>%
@@ -72,6 +75,7 @@ clean_wmemory <- function(tx, word_assoc_clean, cfg) {
 }
 
 clean_sent_rep <- function(tx, cfg) {
+  if (!"response" %in% names(tx) && "word" %in% names(tx)) tx$response <- tx$word
   stopifnot(all(c("participant_id","task","audio_file","prompt","trial","response") %in% names(tx)))
   tx <- tx %>% arrange(participant_id, audio_file, trial, start)
   tx %>%
@@ -84,6 +88,7 @@ clean_sent_rep <- function(tx, cfg) {
 }
 
 clean_reading <- function(tx, cfg) {
+  if (!"response" %in% names(tx) && "word" %in% names(tx)) tx$response <- tx$word
   stopifnot(all(c("participant_id","task","audio_file","prompt","trial","response") %in% names(tx)))
   tx <- tx %>% arrange(participant_id, audio_file, trial, start)
   tx %>%
@@ -122,6 +127,17 @@ cleanup_transcription <- function(transcription, participant_id, config, mode = 
   if (!"response" %in% names(transcription)) transcription$response <- NA_character_
   if (!"task"     %in% names(transcription)) transcription$task     <- NA_character_
   if (!"prompt"   %in% names(transcription)) transcription$prompt   <- NA_character_
+
+  # ---------------------------------------------------------------------------
+  # FIX: Normalize word <-> response so the rest of the function always has
+  # a 'word' column to work with regardless of which path produced the TSV.
+  # A TSV re-run from a previously cleaned file may have 'response' but not
+  # 'word'; the mutate(word = tolower(word)) below would crash in that case.
+  # ---------------------------------------------------------------------------
+  if (!"word" %in% names(transcription) && "response" %in% names(transcription)) {
+    loginfo("  'word' column absent — populating from 'response' column.")
+    transcription$word <- transcription$response
+  }
 
   tx <- transcription %>%
     mutate(
