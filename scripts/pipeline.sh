@@ -14,8 +14,10 @@ set -euo pipefail
 #   --review-dir <path>     Directory of per-rater review TSV files to pass
 #                           to stage 3 (multi-reviewer support). When omitted
 #                           stage 3 checks review_files/ then review_files_staged/.
-#   --force-auto-cleanup    Force stage 3 to re-run automatic cleanup
-#                           even if review files already exist
+#   --no-review             Force stage 3 to skip all reviewer files and run
+#                           automatic cleanup. Use this when the desktop app
+#                           selects the no-reviewer option.
+#   --force-auto-cleanup    Alias for --no-review (kept for back-compat).
 #
 # Stage map:
 #   1 = Audio Preprocessing (R)
@@ -57,7 +59,7 @@ while [[ $# -gt 0 ]]; do
       REVIEW_DIR_OVERRIDE="$2"
       shift 2
       ;;
-    --force-auto-cleanup)
+    --no-review|--force-auto-cleanup)
       FORCE_AUTO_CLEANUP=1
       shift
       ;;
@@ -77,6 +79,9 @@ if [[ -n "$WHISPER_MODEL_OVERRIDE" ]]; then
 fi
 if [[ -n "$REVIEW_DIR_OVERRIDE" ]]; then
   echo "  Review dir  : $REVIEW_DIR_OVERRIDE"
+fi
+if [[ "$FORCE_AUTO_CLEANUP" -eq 1 ]]; then
+  echo "  Review mode : DISABLED (--no-review)"
 fi
 echo "=========================================="
 
@@ -121,16 +126,20 @@ run_stage_2() {
 run_stage_3() {
   echo "[Stage 3] Transcription Cleanup..."
 
-  REVIEW_DIR_ARG=""
+  # Extra args to forward to the R script — built as an array to avoid
+  # word-splitting issues with paths that could contain spaces.
+  RSCRIPT_EXTRA_ARGS=()
 
   if [[ "$FORCE_AUTO_CLEANUP" -eq 1 ]]; then
-    # Explicit override: ignore all review files, run automatic cleanup
-    echo "  [Stage 3] --force-auto-cleanup set — running automatic cleanup from scratch."
+    # --no-review / --force-auto-cleanup: skip all reviewer files entirely.
+    # Do NOT pass --review_dir so the R script sees an empty review_dir and
+    # falls through to the AUTO path.
+    echo "  [Stage 3] no-reviewer mode — automatic cleanup from stage 2 output"
 
   elif [[ -n "$REVIEW_DIR_OVERRIDE" ]]; then
-    # Caller supplied an explicit review directory (e.g. from desktop app staged dir)
+    # Caller supplied an explicit review directory (e.g. from desktop app staged dir).
     echo "  [Stage 3] Using supplied review directory: $REVIEW_DIR_OVERRIDE"
-    REVIEW_DIR_ARG="--review_dir $REVIEW_DIR_OVERRIDE"
+    RSCRIPT_EXTRA_ARGS+=("--review_dir" "$REVIEW_DIR_OVERRIDE")
 
   else
     # Auto-detect: check review_files/ first, then review_files_staged/ as fallback.
@@ -143,19 +152,18 @@ run_stage_3() {
 
     if [[ "$REVIEW_FILES_COUNT" -gt 0 ]]; then
       echo "  [Stage 3] Found $REVIEW_FILES_COUNT review file(s) in review_files/ — using reviewer consensus."
-      REVIEW_DIR_ARG="--review_dir $DEFAULT_REVIEW_DIR"
+      RSCRIPT_EXTRA_ARGS+=("--review_dir" "$DEFAULT_REVIEW_DIR")
 
     else
-      # Fallback: check review_files_staged/
       STAGED_FILES_COUNT=$(find "$STAGED_REVIEW_DIR" -maxdepth 1 \
         -name "${PARTICIPANT_ID}_review_*.tsv" \
         ! -name "*_consensus*" 2>/dev/null | wc -l)
 
       if [[ "$STAGED_FILES_COUNT" -gt 0 ]]; then
         echo "  [Stage 3] Found $STAGED_FILES_COUNT review file(s) in review_files_staged/ — using staged reviewer files."
-        REVIEW_DIR_ARG="--review_dir $STAGED_REVIEW_DIR"
+        RSCRIPT_EXTRA_ARGS+=("--review_dir" "$STAGED_REVIEW_DIR")
       else
-        echo "  [Stage 3] No review files found in review_files/ or review_files_staged/ — running automatic cleanup."
+        echo "  [Stage 3] No review files found — running automatic cleanup."
       fi
     fi
   fi
@@ -168,7 +176,7 @@ run_stage_3() {
       --config "$CONFIG" \
       --reference "$REFERENCE_DIR" \
       --output    "$OUTPUT_DIR" \
-      $REVIEW_DIR_ARG
+      "${RSCRIPT_EXTRA_ARGS[@]+"${RSCRIPT_EXTRA_ARGS[@]}"}"
   echo "[Stage 3] Done."
 }
 
