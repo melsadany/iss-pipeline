@@ -75,6 +75,21 @@ norm_word_response <- function(df) {
 }
 
 # ---------------------------------------------------------------------------
+# Helper: convert a logical or character drop/comment column to character
+# in a way that preserves NA as NA_character_ (not the string "NA").
+# as.character(NA_logical_) produces "NA" in base R which then leaks into
+# string-based filtering logic. This helper avoids that.
+# ---------------------------------------------------------------------------
+lgl_to_char <- function(x) {
+  if (is.logical(x)) {
+    # TRUE -> "TRUE", FALSE -> "FALSE", NA -> NA_character_
+    ifelse(is.na(x), NA_character_, ifelse(x, "TRUE", "FALSE"))
+  } else {
+    as.character(x)
+  }
+}
+
+# ---------------------------------------------------------------------------
 # Helper functions for multi-rater support
 # ---------------------------------------------------------------------------
 
@@ -125,6 +140,8 @@ compute_consensus <- function(raw_tsv, rater_files) {
   # Build per-rater drop/comment vectors aligned to raw_tsv rows via key join.
   # Key: audio_file + start (both present in every stage-2 TSV).
   # If a rater file is missing these columns we fall back to positional fill.
+  # NOTE: use lgl_to_char() instead of as.character() so logical NA stays
+  # NA_character_ rather than becoming the string "NA".
   drop_mat    <- matrix(NA_character_, nrow = n_raw, ncol = length(rater_files))
   comment_mat <- matrix(NA_character_, nrow = n_raw, ncol = length(rater_files))
   colnames(drop_mat)    <- names(rater_files)
@@ -152,19 +169,19 @@ compute_consensus <- function(raw_tsv, rater_files) {
       idx       <- match(raw_keys, rat_keys)   # NA where rater row is missing
 
       if ("drop" %in% names(df)) {
-        drop_vals            <- as.character(df$drop)
-        drop_mat[, i]        <- ifelse(is.na(idx), NA_character_, drop_vals[idx])
+        drop_vals     <- lgl_to_char(df$drop)
+        drop_mat[, i] <- ifelse(is.na(idx), NA_character_, drop_vals[idx])
       }
       if ("comment" %in% names(df)) {
-        comment_vals         <- as.character(df$comment)
-        comment_mat[, i]     <- ifelse(is.na(idx), NA_character_, comment_vals[idx])
+        comment_vals     <- lgl_to_char(df$comment)
+        comment_mat[, i] <- ifelse(is.na(idx), NA_character_, comment_vals[idx])
       }
     } else {
       # Fallback: positional fill up to min(nrow(df), n_raw)
       log_warn("  Rater [{nm}]: key columns missing — using positional alignment (row counts may differ).")
       n_use <- min(nrow(df), n_raw)
-      if ("drop"    %in% names(df)) drop_mat[seq_len(n_use), i]    <- as.character(df$drop[seq_len(n_use)])
-      if ("comment" %in% names(df)) comment_mat[seq_len(n_use), i] <- as.character(df$comment[seq_len(n_use)])
+      if ("drop"    %in% names(df)) drop_mat[seq_len(n_use), i]    <- lgl_to_char(df$drop[seq_len(n_use)])
+      if ("comment" %in% names(df)) comment_mat[seq_len(n_use), i] <- lgl_to_char(df$comment[seq_len(n_use)])
     }
   }
 
@@ -221,30 +238,52 @@ auto_stats_path <- file.path(
 
 apply_review_tsv <- function(reviewed, config, n_dropped_extra = 0L) {
   # norm_bool: robustly coerce any representation of TRUE/FALSE to logical.
-  # Handles: actual logical, string "TRUE"/"FALSE", "1"/"0", "YES"/"NO", NA.
+  # Handles: actual logical TRUE/NA, character "TRUE"/"FALSE", "1"/"0",
+  # "YES"/"NO", NA_character_, and the string "NA" (readr artefact).
+  # Uses element-wise isTRUE() for logical input so TRUE/NA/FALSE are each
+  # handled unambiguously without relying on ifelse NA-propagation behaviour.
   norm_bool <- function(x) {
     if (is.logical(x)) {
-      # Replace NA logical with FALSE (absent drop flag = keep row)
-      return(ifelse(is.na(x), FALSE, x))
+      # Element-wise: TRUE -> TRUE, FALSE -> FALSE, NA -> FALSE (keep row)
+      return(vapply(x, isTRUE, logical(1)))
     }
     s <- toupper(trimws(as.character(x)))
-    # Treat NA, empty, or literal "NA" string as FALSE (keep)
+    # Treat NA, empty string, or the literal string "NA" as FALSE (keep row)
     s[is.na(s) | s == "" | s == "NA"] <- "FALSE"
     s %in% c("TRUE", "1", "YES")
   }
+
   if (!"drop"    %in% names(reviewed)) reviewed$drop    <- FALSE
   if (!"comment" %in% names(reviewed)) reviewed$comment <- NA_character_
+
+  # Diagnostic: log drop column type and value distribution before coercion
+  drop_raw  <- reviewed$drop
+  drop_type <- class(drop_raw)[1]
+  n_true  <- sum(isTRUE(drop_raw) | (!is.na(drop_raw) & toupper(trimws(as.character(drop_raw))) %in% c("TRUE","1","YES")), na.rm = TRUE)
+  n_false <- sum(!is.na(drop_raw) & toupper(trimws(as.character(drop_raw))) %in% c("FALSE","0","NO"), na.rm = TRUE)
+  n_na    <- sum(is.na(drop_raw))
+  log_info("  drop column: type=<{drop_type}> TRUE={n_true} FALSE={n_false} NA={n_na} (NA treated as keep)")
+
   reviewed <- reviewed %>%
     mutate(
       drop    = norm_bool(drop),
-      comment = ifelse(toupper(trimws(as.character(comment))) %in%
-                         c("FALSE", "NA", ""), NA_character_, as.character(comment))
+      comment = {
+        # Guard: if comment is logical (all NA), convert cleanly without
+        # producing the string "NA"
+        cm <- if (is.logical(comment)) {
+          rep(NA_character_, length(comment))
+        } else {
+          as.character(comment)
+        }
+        ifelse(toupper(trimws(cm)) %in% c("FALSE", "NA", ""), NA_character_, cm)
+      }
     )
 
+  # Diagnostic: log drop distribution after coercion
+  n_drop_after <- sum(reviewed$drop, na.rm = TRUE)
+  log_info("  drop after coercion: TRUE={n_drop_after} FALSE/keep={nrow(reviewed) - n_drop_after}")
+
   # Warn if an unusually high fraction of rows are flagged for dropping.
-  # This most often indicates that the desktop app wrote drop as a string
-  # ("TRUE") rather than a logical, and the coercion silently treated every
-  # row as drop=TRUE in an earlier code version.
   pct_drop <- mean(reviewed$drop, na.rm = TRUE)
   if (pct_drop > 0.8) {
     log_warn(
