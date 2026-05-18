@@ -95,7 +95,7 @@ log_info("  Running feature extraction...")
 stage_start <- proc.time()[[3]]
 
 features <- extract_all_features_iss(
-  cleaned_transcription = clean_tx_by_task,
+  cleaned_transcription = clean_tx,
   participant_id        = opt$id,
   embeddings            = pipeline_env$embeddings,
   archetype_refs        = pipeline_env$archetype_refs,
