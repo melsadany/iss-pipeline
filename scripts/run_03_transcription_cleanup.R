@@ -39,6 +39,14 @@ option_list <- list(
                 "When no review files are found the script falls back to the",
                 "automatic cleanup path."
               )),
+  make_option(c("--no_review"),          type = "logical",   default = FALSE,
+              action = "store_true",
+              help = paste(
+                "Force automatic cleanup — skip all reviewer file detection.",
+                "When set, --review_dir is ignored and the script goes directly",
+                "to the AUTO path regardless of what files exist on disk.",
+                "Pass this flag when the desktop app selects no-reviewer mode."
+              )),
   make_option(c("--reviewed_tsv"),       type = "character", default = NULL,
               help = "[DEPRECATED] Legacy single-reviewer TSV. Use --review_dir instead."),
   make_option(c("--mode"),               type = "character", default = "auto",
@@ -396,20 +404,32 @@ run_task_cleaners <- function(tx_clean, config) {
 # ---------------------------------------------------------------------------
 # Resolve the review-file directory
 # ---------------------------------------------------------------------------
-effective_review_dir <- if (!is.null(opt$review_dir) && nzchar(opt$review_dir)) {
-  opt$review_dir
-} else {
-  file.path(opt$output, "review_files")
-}
+# When --no_review is set, skip ALL reviewer file detection regardless of
+# what files exist on disk and go straight to the AUTO path.
+# Otherwise, resolve the directory: explicit --review_dir takes priority;
+# when absent fall back to output/review_files/ (legacy behaviour).
+# ---------------------------------------------------------------------------
+force_auto <- isTRUE(opt$no_review)
 
-all_review_files <- character(0)
-if (dir.exists(effective_review_dir)) {
-  pattern          <- paste0("^", opt$id, "_review_[A-Za-z0-9]+_\\d{8}T\\d{4}\\.tsv$")
-  all_review_files <- list.files(effective_review_dir, pattern = pattern, full.names = TRUE)
+if (force_auto) {
+  log_info("  Path          : AUTO (--no-review flag set — skipping reviewer file scan)")
+  all_review_files <- character(0)
+} else {
+  effective_review_dir <- if (!is.null(opt$review_dir) && nzchar(opt$review_dir)) {
+    opt$review_dir
+  } else {
+    file.path(opt$output, "review_files")
+  }
+
+  all_review_files <- character(0)
+  if (dir.exists(effective_review_dir)) {
+    pattern          <- paste0("^", opt$id, "_review_[A-Za-z0-9]+_\\d{8}T\\d{4}\\.tsv$")
+    all_review_files <- list.files(effective_review_dir, pattern = pattern, full.names = TRUE)
+  }
+  all_review_files <- all_review_files[
+    !grepl("_consensus", basename(all_review_files))
+  ]
 }
-all_review_files <- all_review_files[
-  !grepl("_consensus", basename(all_review_files))
-]
 
 stage_start <- proc.time()[[3]]
 
