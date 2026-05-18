@@ -11,24 +11,10 @@ set -euo pipefail
 #   --stage {1|2|3|4|all}   Which stage(s) to run (default: all)
 #   --whisper-model <name>  Override whisper model in config
 #                           (e.g. small, medium, large-v3)
-#   --review-dir <path>     Directory of per-rater review TSV files to pass
-#                           to stage 3 (multi-reviewer support). When omitted
-#                           stage 3 checks review_files/ then review_files_staged/.
-#   --no-review             Force stage 3 to skip all reviewer files and run
-#                           automatic cleanup. Use this when the desktop app
-#                           selects the no-reviewer option.
-#   --force-auto-cleanup    Alias for --no-review (kept for back-compat).
 #
-# Stage map:
-#   1 = Audio Preprocessing (R)
-#   2 = Transcription       (WhisperX / Python)
-#   3 = Transcription Cleanup (R)
-#   4 = Feature Extraction  (R + Python wrappers)
-#
-# Review file directories (checked in order for stage 3):
-#   1. --review-dir <path>        explicit override (highest priority)
-#   2. $OUTPUT_DIR/review_files/  default location where stage 3 writes files
-#   3. $OUTPUT_DIR/review_files_staged/  staging area populated by desktop app
+# REVIEWER SUPPORT TEMPORARILY DISABLED — see commented blocks below.
+# Re-enable by uncommenting the --review-dir / --no-review / --force-auto-cleanup
+# option parsing and the corresponding run_stage_3 branches.
 # ============================================================
 
 PARTICIPANT_ID=${1:-"TEST0001"}
@@ -40,8 +26,9 @@ REFERENCE_DIR="/app/reference_data"
 # Defaults
 STAGE="all"
 WHISPER_MODEL_OVERRIDE=""
-REVIEW_DIR_OVERRIDE=""
-FORCE_AUTO_CLEANUP=0
+# REVIEWER DISABLED:
+# REVIEW_DIR_OVERRIDE=""
+# FORCE_AUTO_CLEANUP=0
 
 # Parse extra options (starting from arg 4)
 shift 3 2>/dev/null || true
@@ -55,14 +42,15 @@ while [[ $# -gt 0 ]]; do
       WHISPER_MODEL_OVERRIDE="$2"
       shift 2
       ;;
-    --review-dir)
-      REVIEW_DIR_OVERRIDE="$2"
-      shift 2
-      ;;
-    --no-review|--force-auto-cleanup)
-      FORCE_AUTO_CLEANUP=1
-      shift
-      ;;
+    # REVIEWER DISABLED: option parsing commented out
+    # --review-dir)
+    #   REVIEW_DIR_OVERRIDE="$2"
+    #   shift 2
+    #   ;;
+    # --no-review|--force-auto-cleanup)
+    #   FORCE_AUTO_CLEANUP=1
+    #   shift
+    #   ;;
     *)
       shift
       ;;
@@ -76,12 +64,6 @@ echo "  Audio file  : $AUDIO_FILE"
 echo "  Stage       : $STAGE"
 if [[ -n "$WHISPER_MODEL_OVERRIDE" ]]; then
   echo "  Whisper     : $WHISPER_MODEL_OVERRIDE (override)"
-fi
-if [[ -n "$REVIEW_DIR_OVERRIDE" ]]; then
-  echo "  Review dir  : $REVIEW_DIR_OVERRIDE"
-fi
-if [[ "$FORCE_AUTO_CLEANUP" -eq 1 ]]; then
-  echo "  Review mode : DISABLED (--no-review)"
 fi
 echo "=========================================="
 
@@ -106,7 +88,6 @@ run_stage_1() {
 run_stage_2() {
   echo "[Stage 2] Transcription..."
 
-  # Build whisper model arg — prefer CLI override, else read from config
   WHISPER_ARG=""
   if [[ -n "$WHISPER_MODEL_OVERRIDE" ]]; then
     WHISPER_ARG="--whisper_model $WHISPER_MODEL_OVERRIDE"
@@ -125,49 +106,40 @@ run_stage_2() {
 # ---- helper: run_stage_3 ----
 run_stage_3() {
   echo "[Stage 3] Transcription Cleanup..."
+  echo "  [Stage 3] Auto cleanup mode — reviewer files disabled."
 
-  # Extra args to forward to the R script — built as an array to avoid
-  # word-splitting issues with paths that could contain spaces.
-  RSCRIPT_EXTRA_ARGS=()
-
-  if [[ "$FORCE_AUTO_CLEANUP" -eq 1 ]]; then
-    # --no-review / --force-auto-cleanup: skip all reviewer files entirely.
-    # Pass --no_review (underscore form) to the R script so optparse picks it
-    # up and the script skips its own reviewer file scan unconditionally.
-    echo "  [Stage 3] no-reviewer mode — automatic cleanup from stage 2 output"
-    RSCRIPT_EXTRA_ARGS+=("--no_review")
-
-  elif [[ -n "$REVIEW_DIR_OVERRIDE" ]]; then
-    # Caller supplied an explicit review directory (e.g. from desktop app staged dir).
-    echo "  [Stage 3] Using supplied review directory: $REVIEW_DIR_OVERRIDE"
-    RSCRIPT_EXTRA_ARGS+=("--review_dir" "$REVIEW_DIR_OVERRIDE")
-
-  else
-    # Auto-detect: check review_files/ first, then review_files_staged/ as fallback.
-    DEFAULT_REVIEW_DIR="$OUTPUT_DIR/review_files"
-    STAGED_REVIEW_DIR="$OUTPUT_DIR/review_files_staged"
-
-    REVIEW_FILES_COUNT=$(find "$DEFAULT_REVIEW_DIR" -maxdepth 1 \
-      -name "${PARTICIPANT_ID}_review_*.tsv" \
-      ! -name "*_consensus*" 2>/dev/null | wc -l)
-
-    if [[ "$REVIEW_FILES_COUNT" -gt 0 ]]; then
-      echo "  [Stage 3] Found $REVIEW_FILES_COUNT review file(s) in review_files/ — using reviewer consensus."
-      RSCRIPT_EXTRA_ARGS+=("--review_dir" "$DEFAULT_REVIEW_DIR")
-
-    else
-      STAGED_FILES_COUNT=$(find "$STAGED_REVIEW_DIR" -maxdepth 1 \
-        -name "${PARTICIPANT_ID}_review_*.tsv" \
-        ! -name "*_consensus*" 2>/dev/null | wc -l)
-
-      if [[ "$STAGED_FILES_COUNT" -gt 0 ]]; then
-        echo "  [Stage 3] Found $STAGED_FILES_COUNT review file(s) in review_files_staged/ — using staged reviewer files."
-        RSCRIPT_EXTRA_ARGS+=("--review_dir" "$STAGED_REVIEW_DIR")
-      else
-        echo "  [Stage 3] No review files found — running automatic cleanup."
-      fi
-    fi
-  fi
+  # REVIEWER DISABLED: all reviewer-file detection / staging commented out.
+  # To re-enable, uncomment the blocks below and restore FORCE_AUTO_CLEANUP
+  # / REVIEW_DIR_OVERRIDE logic above.
+  #
+  # RSCRIPT_EXTRA_ARGS=()
+  # if [[ "$FORCE_AUTO_CLEANUP" -eq 1 ]]; then
+  #   echo "  [Stage 3] no-reviewer mode — automatic cleanup from stage 2 output"
+  #   RSCRIPT_EXTRA_ARGS+=("--no_review")
+  # elif [[ -n "$REVIEW_DIR_OVERRIDE" ]]; then
+  #   echo "  [Stage 3] Using supplied review directory: $REVIEW_DIR_OVERRIDE"
+  #   RSCRIPT_EXTRA_ARGS+=("--review_dir" "$REVIEW_DIR_OVERRIDE")
+  # else
+  #   DEFAULT_REVIEW_DIR="$OUTPUT_DIR/review_files"
+  #   STAGED_REVIEW_DIR="$OUTPUT_DIR/review_files_staged"
+  #   REVIEW_FILES_COUNT=$(find "$DEFAULT_REVIEW_DIR" -maxdepth 1 \
+  #     -name "${PARTICIPANT_ID}_review_*.tsv" \
+  #     ! -name "*_consensus*" 2>/dev/null | wc -l)
+  #   if [[ "$REVIEW_FILES_COUNT" -gt 0 ]]; then
+  #     echo "  [Stage 3] Found $REVIEW_FILES_COUNT review file(s) in review_files/ — using reviewer consensus."
+  #     RSCRIPT_EXTRA_ARGS+=("--review_dir" "$DEFAULT_REVIEW_DIR")
+  #   else
+  #     STAGED_FILES_COUNT=$(find "$STAGED_REVIEW_DIR" -maxdepth 1 \
+  #       -name "${PARTICIPANT_ID}_review_*.tsv" \
+  #       ! -name "*_consensus*" 2>/dev/null | wc -l)
+  #     if [[ "$STAGED_FILES_COUNT" -gt 0 ]]; then
+  #       echo "  [Stage 3] Found $STAGED_FILES_COUNT review file(s) in review_files_staged/ — using staged reviewer files."
+  #       RSCRIPT_EXTRA_ARGS+=("--review_dir" "$STAGED_REVIEW_DIR")
+  #     else
+  #       echo "  [Stage 3] No review files found — running automatic cleanup."
+  #     fi
+  #   fi
+  # fi
 
   /opt/conda/bin/conda run --no-capture-output -n r_pipeline_env \
     Rscript /app/scripts/run_03_transcription_cleanup.R \
@@ -177,7 +149,7 @@ run_stage_3() {
       --config "$CONFIG" \
       --reference "$REFERENCE_DIR" \
       --output    "$OUTPUT_DIR" \
-      "${RSCRIPT_EXTRA_ARGS[@]+"${RSCRIPT_EXTRA_ARGS[@]}"}"
+      --no_review
   echo "[Stage 3] Done."
 }
 
