@@ -132,9 +132,10 @@ run_stage_3() {
 
   if [[ "$FORCE_AUTO_CLEANUP" -eq 1 ]]; then
     # --no-review / --force-auto-cleanup: skip all reviewer files entirely.
-    # Do NOT pass --review_dir so the R script sees an empty review_dir and
-    # falls through to the AUTO path.
+    # Pass --no_review (underscore form) to the R script so optparse picks it
+    # up and the script skips its own reviewer file scan unconditionally.
     echo "  [Stage 3] no-reviewer mode — automatic cleanup from stage 2 output"
+    RSCRIPT_EXTRA_ARGS+=("--no_review")
 
   elif [[ -n "$REVIEW_DIR_OVERRIDE" ]]; then
     # Caller supplied an explicit review directory (e.g. from desktop app staged dir).
